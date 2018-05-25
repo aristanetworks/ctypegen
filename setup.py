@@ -20,9 +20,11 @@ setup( name="CTypeGen",
         version="0.9",
         py_modules=[
             "CTypeGen",
+            "CMock",
             "PyDwarfWrapper",
             "CTypeGenRun",
         ],
         ext_modules=[
-            Extension( 'libCTypeGen', [ 'CTypeGen.cpp', ], libraries=[ 'dwelf' ] )
+            Extension( 'libCTypeGen', [ 'CTypeGen.cpp', ], libraries=[ 'dwelf' ] ),
+            Extension( 'libCTypeMock', [ 'cmock.cpp' ], libraries=[ 'dwelf' ] ),
         ] )

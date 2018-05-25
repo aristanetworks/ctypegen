@@ -12,14 +12,16 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-PYTHON ?= python2
-.PHONY: all test install
+.PHONY: all test install clean
+
+PYTHON ?= $(shell which python2)
+
 all:
-	$(PYTHON) ./setup.py build
+	env CFLAGS="-g -O0 --std=c++14" $(PYTHON) ./setup.py build
 install:
-	$(PYTHON) ./setup.py install
+	env CFLAGS="-g -O0 --std=c++14" $(PYTHON) ./setup.py install
 test:
 	make -C test
 clean:
-	rm -rf build
+	rm -rf build __pycache__ core
 	make -C test clean

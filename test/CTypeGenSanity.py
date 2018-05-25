@@ -67,7 +67,7 @@ module, generator = generate(
       globalVars=globalVars )
 
 assert warnCount == 1
-assert "No such file" in warnings[0]
+assert "No such file" in warnings[ 0 ]
 clearWarnings()
 
 # Test filename not a string.
@@ -80,7 +80,7 @@ module, generator = generate(
       globalVars=globalVars )
 
 assert warnCount == 1
-assert "requires a list of ELF images" in warnings[0]
+assert "requires a list of ELF images" in warnings[ 0 ]
 clearWarnings()
 
 # Test file is not an ELF image
@@ -93,7 +93,7 @@ module, generator = generate(
       globalVars=globalVars )
 
 assert warnCount == 1
-assert "not an ELF" in warnings[0]
+assert "not an ELF" in warnings[ 0 ]
 clearWarnings()
 
 # Now actually generate the module, complete with warnings

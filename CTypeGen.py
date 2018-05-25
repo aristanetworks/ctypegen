@@ -956,7 +956,7 @@ def generateOrThrow( binaries, outname, types, functions, header, modname,
    # Allow binaries to be a single string, or list thereof.
    if isinstance( binaries,  basestring ):
       binaries = [ binaries ]
-   if not isinstance( binaries, list ) or not isinstance( binaries[0], basestring ):
+   if not isinstance( binaries, list ) or not isinstance( binaries[ 0 ], basestring ):
       errorfunc( "CTypeGen.generate requires a list of ELF images as its first" +
                  " argument" )
       return ( None, None )
@@ -965,8 +965,8 @@ def generateOrThrow( binaries, outname, types, functions, header, modname,
    with open( outname, 'w' ) as content:
 
       stack = inspect.stack()
-      frame = stack[1]
-      callerSource = frame[1]
+      frame = stack[ 1 ]
+      callerSource = frame[ 1 ]
 
       warning = \
 '''# Copyright (c) %d Arista Networks, Inc.  All rights reserved.

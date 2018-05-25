@@ -80,7 +80,7 @@ open( PyObject * self, PyObject * args ) {
       val->obj = val->dwarf->elf;
       return ( PyObject * )val;
    }
-   catch (const std::exception &ex) {
+   catch ( const std::exception &ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
       return nullptr;
    }

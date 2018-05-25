@@ -22,8 +22,12 @@ all: check
 CTypeSanity: CTypeSanityC.o CTypeSanity.o
 	$(CXX) -shared -o $@ $^
 
-check: CTypeSanity
+MockTest: MockTest.o
+	$(CXX) -shared -o $@ $^
+
+check: CTypeSanity MockTest
 	$(PYTHON) ./CTypeGenSanity.py
+	$(PYTHON) ./MockTest.py
 
 clean:
-	rm -f *.o CTypeSanity CTypeSanity.py *.pyc
+	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py
