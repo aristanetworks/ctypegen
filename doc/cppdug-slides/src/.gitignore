@@ -1,0 +1,10 @@
+?
+*.o
+*.out
+*.pyc
+basic.py
+*.so
+*.htmlc
+*.htmlpy
+*gen.py
+htmlfilt

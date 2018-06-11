@@ -1,0 +1,6 @@
+[submodule "doc/cppdug-slides/reveal.js"]
+	path = doc/cppdug-slides/reveal.js
+	url = https://github.com/hakimel/reveal.js
+[submodule "doc/cppdug-slides/external"]
+	path = doc/cppdug-slides/external
+	url = https://github.com/calevans/external
