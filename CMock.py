@@ -43,20 +43,23 @@ class Mock( object ):
    argtypes set on it correctly, and the python "mock" function you decorate
    should conform to that. CTypeGen can do this with decorateFunctions '''
 
-   def __init__( self, function, inlib=None, forlibs=None, method=GOT ):
+   def __init__( self, function, inlib=None, forlibs=None, method=GOT, linkername = None ):
       self.forlibs = forlibs
       self.inlib = inlib
       self.callbackType = CFUNCTYPE( function.restype, *function.argtypes )
       self.function = function
       self.method = method
+      self.linkername = linkername
 
    def __call__( self, toMock ):
+      if self.linkername is None:
+         self.linkername is self.function.__name__
       callback = self.callbackType( toMock )
       callbackForC = cmockCdll.cfuncTypeToPtrToFunc( callback )
       if self.method == GOT:
-         self.mock = libCTypeMock.GOTMock( self.function.__name__, callbackForC, 0 )
+         self.mock = libCTypeMock.GOTMock( self.linkername, callbackForC, 0 )
       else:
-         self.mock = libCTypeMock.StompMock( self.function.__name__, callbackForC, self.inlib._handle if self.inlib else None)
+         self.mock = libCTypeMock.StompMock( self.linkername, callbackForC, self.inlib._handle if self.inlib else None)
       toMock.disable = lambda: self.mock.disable()
       toMock.enable = lambda: self.mock.enable()
       callbacks.append( ( callback, toMock ) )

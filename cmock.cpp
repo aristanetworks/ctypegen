@@ -73,7 +73,7 @@ struct GOTMock {
    void *callback;
    const char *function;
    GOTMock( const char *name_, void *callback_, void *handle_ );
-   void processLibrary( ElfW( Dyn ) *dynamic, ElfW( Addr ) loadaddr,
+   void processLibrary( const char *, ElfW( Dyn ) *dynamic, ElfW( Addr ) loadaddr,
          const char *function, void *thunk );
    static void handleAddend( const ElfW( Rel ) &rel ) { }
    static void handleAddend( const ElfW( Rela ) &rela ) {
@@ -117,10 +117,10 @@ GOTMock::GOTMock( const char *name_, void *callback_, void *handle )
    if ( handle == 0 ) {
       // Override function in all libraries.
       for ( auto map = _r_debug.r_map; map; map = map->l_next )
-         processLibrary( map->l_ld, map->l_addr, function, callback );
+         processLibrary( map->l_name, map->l_ld, map->l_addr, function, callback );
    } else {
       auto map = static_cast<link_map *>( handle );
-      processLibrary( map->l_ld, map->l_addr, function, callback );
+      processLibrary( map->l_name, map->l_ld, map->l_addr, function, callback );
    }
    enable();
 }
@@ -158,8 +158,11 @@ GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
  */
 void
 GOTMock::enable() {
-   for ( auto &addr : replaced )
-      *( void ** )addr.first = callback;
+   for ( auto &addr : replaced ) {
+      auto p = ( void ** )addr.first;
+      protect(PROT_READ|PROT_WRITE, p, sizeof callback);
+      *p = callback;
+   }
 }
 
 /*
@@ -176,7 +179,7 @@ GOTMock::disable() {
  * Process a single library's relocation information
  */
 void
-GOTMock::processLibrary( ElfW( Dyn ) *dynamic, ElfW( Addr ) loadaddr,
+GOTMock::processLibrary( const char *libname, ElfW( Dyn ) *dynamic, ElfW( Addr ) loadaddr,
       const char *function, void *thunk ) {
 
    int reltype = -1;
@@ -210,19 +213,14 @@ GOTMock::processLibrary( ElfW( Dyn ) *dynamic, ElfW( Addr ) loadaddr,
 
    switch ( reltype ) {
       case DT_REL:
-         relocas = 0;
+         findGotEntries( loadaddr, relocs, reloclen, symbols, strings );
          break;
       case DT_RELA:
-         relocs = 0;
+         findGotEntries( loadaddr, relocas, reloclen, symbols, strings );
          break;
       default:
-         return;
+         break;
    }
-
-   if ( relocas )
-       findGotEntries( loadaddr, relocas, reloclen, symbols, strings );
-   else if ( relocs )
-       findGotEntries( loadaddr, relocs, reloclen, symbols, strings );
 }
 
 /*
