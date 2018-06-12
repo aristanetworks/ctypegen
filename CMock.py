@@ -53,7 +53,7 @@ class Mock( object ):
 
    def __call__( self, toMock ):
       if self.linkername is None:
-         self.linkername is self.function.__name__
+         self.linkername = self.function.__name__
       callback = self.callbackType( toMock )
       callbackForC = cmockCdll.cfuncTypeToPtrToFunc( callback )
       if self.method == GOT:
