@@ -21,17 +21,15 @@ import io
 import imp
 import inspect
 import libCTypeGen
-import sys
-import traceback
 
 attrs = libCTypeGen.attrs
 tags = libCTypeGen.tags
 
 # python3 doesn't have basestring
 try:
-   basestring
+   baseString = basestring
 except NameError:
-   basestring = str
+   baseString = str
 
 # Add explicit dependency on CTypeGen runtime - we need this when we run the
 # sanity check on the generated file.
@@ -954,9 +952,10 @@ def generateOrThrow( binaries, outname, types, functions, header, modname,
    '''
 
    # Allow binaries to be a single string, or list thereof.
-   if isinstance( binaries,  basestring ):
+   if isinstance( binaries,  baseString ):
       binaries = [ binaries ]
-   if not isinstance( binaries, list ) or not isinstance( binaries[ 0 ], basestring ):
+   if not isinstance( binaries, list ) or not isinstance(
+         binaries[ 0 ], baseString ):
       errorfunc( "CTypeGen.generate requires a list of ELF images as its first" +
                  " argument" )
       return ( None, None )

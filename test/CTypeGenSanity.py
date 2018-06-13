@@ -16,6 +16,12 @@
 from CTypeGen import generate, PythonType
 from ctypes import c_char, CDLL, c_void_p, c_long, c_int, cast, sizeof
 from ctypes import POINTER, c_char_p, c_ulong
+import sys
+
+if len(sys.argv) >= 2:
+   sanitylib = sys.argv[1]
+else:
+   sanitylib = ".libs/libCTypeSanity.so"
 
 types = [
       PythonType( "Foo" )
@@ -98,7 +104,7 @@ clearWarnings()
 
 # Now actually generate the module, complete with warnings
 module, generator = generate(
-      [ "CTypeSanity" ],
+      [ sanitylib ],
       "CTypeSanity.py",
       types,
       functions,

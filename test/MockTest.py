@@ -14,13 +14,19 @@
 #     limitations under the License.
 from CTypeGen import generate
 import CMock
+import sys
 from ctypes import CDLL
 
+if len(sys.argv) >= 2:
+   mocklib = sys.argv[1]
+else:
+   mocklib = ".libs/libMockTest.so"
+
 # Generate type info for "f", and "entry" so we can call them.
-module, resolver = generate( "./MockTest", "proggen.py", [], [ "f", "entry" ] )
+module, resolver = generate( mocklib, "proggen.py", [], [ "f", "entry" ] )
 
 # Load the DLL, and decorate the functions with their prototypes.
-lib = CDLL( "./MockTest" )
+lib = CDLL( mocklib )
 module.decorateFunctions( lib )
 
 # if f is not mocked, we expect the behaviour from the C function

@@ -273,7 +273,8 @@ gotNew( PyTypeObject *subtype, PyObject *args, PyObject *kwds ) {
    long long callback;
    long long handle;
 
-   PyArg_ParseTuple( args, "sLL", &name, &callback, &handle );
+   if (!PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ))
+      return nullptr;
    new ( obj ) GOTMock( name, ( void * )callback, ( void * )handle );
    return reinterpret_cast<PyObject *>( obj );
 }
@@ -306,7 +307,8 @@ stompNew( PyTypeObject *subtype, PyObject *args, PyObject *kwds ) {
    long long callback;
    long long handle;
 
-   PyArg_ParseTuple( args, "sLL", &name, &callback, &handle );
+   if (!PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ))
+      return nullptr;
    new ( obj ) StompMock( name, (void *)callback, handle );
    return reinterpret_cast<PyObject *>( obj );
 }

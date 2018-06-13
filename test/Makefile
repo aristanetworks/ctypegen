@@ -26,8 +26,8 @@ MockTest: MockTest.o
 	$(CXX) -shared -o $@ $^
 
 check: CTypeSanity MockTest
-	$(PYTHON) ./CTypeGenSanity.py
-	$(PYTHON) ./MockTest.py
+	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
+	$(PYTHON) ./MockTest.py ./MockTest
 
 clean:
 	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py
