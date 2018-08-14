@@ -85,21 +85,16 @@ class Type( object ):
    def __init__( self, resolver, die ):
       self.resolver = resolver
       self.die = die
-      self._name = die[ attrs.DW_AT_name ]
+      self._name = die.qualifiedName
 
    def dieComment( self ):
       if self.pyName() == self.name():
          return u""
-      return u"# DIE %s::%s" % ( self.die.die.scope(), self.name() )
+      return u"# DIE %s" % self.name()
 
    def pyName( self ):
       ''' Remove non-python characters from this type's name'''
-      scope = self.die.die.scope()
-      if scope:
-         name = scope + "::" + self.name()
-      else:
-         name = self.name()
-      return asPythonId( name )
+      return asPythonId( self.name() )
 
    def declare( self, out ):
       ''' Write to out any info required to refer to this type.'''
@@ -737,27 +732,26 @@ class TypeResolver( object ):
          self.definedTypes[ typ.pyName() ] = typ
          typ.define( out )
 
-   def findInterestingDIEs( self, handle, die ):
-      ''' Find any potentially interesting dwarf DIEs'''
+   def findInterestingDIEs( self, handle, die, ctx ):
+      ''' Find any potentially interesting dwarf DIEs
+      ctx is passed down to child DIEs - we use it to store the current namespace.
+      '''
 
       tag = die.tag()
 
-      # Don't descend down namespaces for named dies yet - we don't have a coherent
-      # approach to namespaces.
-      if tag == tags.DW_TAG_namespace:
-         return False
-
       name = die[ attrs.DW_AT_name ]
       if name == None:
-         return True
+         die.qualifiedName = None
+         return ctx
+      die.qualifiedName = name if ctx == "" else "%s::%s" % ( ctx, name )
 
       # Remember all type DIEs. Prefer definitions to declarations but assume
       # multiple DIEs of the same name are for the same type in different
       # translation units.
       if tag in TypeResolver.typeDieTags and \
-            ( name not in self.typeDiesByName or
-                  self.typeDiesByName[ name ][ attrs.DW_AT_declaration ] ):
-         self.typeDiesByName[ name ] = die
+            ( die.qualifiedName not in self.typeDiesByName or
+                  self.typeDiesByName[ die.qualifiedName ][ attrs.DW_AT_declaration ] ):
+         self.typeDiesByName[ die.qualifiedName ] = die
 
       # Find any potentially interesting dwarf entries for defined functions.
       if tag == tags.DW_TAG_subprogram and name in self.functions and \
@@ -767,8 +761,7 @@ class TypeResolver( object ):
       # Find any DIEs for global variables we're interested in
       if tag == tags.DW_TAG_variable and name in self.globalVars:
          self.globalVarDiesByName[ name ] = die
-      return True
-
+      return die.qualifiedName if isNamespaceTag( tag ) else ctx
 
    def error( self, txt ):
       self.errors += 1
@@ -795,7 +788,7 @@ class TypeResolver( object ):
       # Find all DIEs we are potentially interested in
       for dwarf in self.dwarves:
          for u in dwarf.getUnits():
-            dwarf.enumerateDIEs( u.getTopDIE(), self.findInterestingDIEs )
+            dwarf.enumerateDIEs( u.getTopDIE(), self.findInterestingDIEs, "" )
 
       # Check we found anything the user explicitly asked for.
       for globname in self.globalVars:
@@ -928,8 +921,8 @@ class PythonType( object ):
       return self
 
 
-def generateOrThrow( binaries, outname, types, functions, header, modname,
-      existingTypes, errorfunc, globalVars ):
+def generateOrThrow( binaries, outname, types, functions, header=None, modname=None,
+      existingTypes=None, errorfunc=error, globalVars=None ):
    '''  External interface to generate code from a set of binaries, into a python
    module.
    Parameters:
@@ -998,3 +991,6 @@ def generate( binaries, outname, types, functions, header=None, modname=None,
    except Exception as e: # pylint: disable=broad-except
       errorfunc( "Fatal error: %s" % e )
       return None, None
+
+def isNamespaceTag( tag ):
+   return tag in [ tags.DW_TAG_namespace , tags.DW_TAG_structure_type, tags.DW_TAG_class_type ]

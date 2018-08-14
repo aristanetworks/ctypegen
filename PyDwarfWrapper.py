@@ -23,10 +23,18 @@ class Unit( object ):
       global _unitCount
       self.top = top
       self.unitId = _unitCount
+      self.wrappedDIEs = {}
+      self.locked = False
       _unitCount = _unitCount + 1
 
+   def getWrappedDIE( self, die ):
+       if die not in self.wrappedDIEs:
+           assert not self.locked
+           self.wrappedDIEs[ die ] = WrappedDIE( self, die )
+       return self.wrappedDIEs[ die ]
+       
    def getTopDIE( self ):
-      return WrappedDIE( self, self.top )
+      return self.getWrappedDIE( self.top )
 
 class DwarfHandle( object ):
    def __init__( self, dwarf ):
@@ -35,13 +43,17 @@ class DwarfHandle( object ):
       for u in self.dwarf.units():
          self.units.append( Unit( u ) )
 
-   def enumerateDIEs( self, wrappedDie, func ):
-      self.enumerateUnwrappedDIEs( wrappedDie.unit, wrappedDie.die, func )
+   def enumerateDIEs( self, wrappedDie, func, ctx ):
+      self.enumerateUnwrappedDIEs( wrappedDie.unit, wrappedDie.die, func, ctx )
+      wrappedDie.unit.locked = True
 
-   def enumerateUnwrappedDIEs( self, unit, die, func ):
-      if func( self, WrappedDIE( unit, die ) ):
+   def enumerateUnwrappedDIEs( self, unit, die, func, ctx ):
+      wrapped = unit.getWrappedDIE( die )
+      ctx = func( self, wrapped, ctx )
+      assert ctx is not None
+      if ctx is not None:
          for child in die:
-            self.enumerateUnwrappedDIEs( unit, child, func )
+            self.enumerateUnwrappedDIEs( unit, child, func, ctx )
 
    def getUnits( self ):
       return self.units
@@ -67,10 +79,10 @@ class WrappedDIE( object ):
       base = self[ dwarfattr.DW_AT_type ]
       if not base:
          return None
-      return WrappedDIE( self.unit, base )
+      return self.unit.getWrappedDIE( base )
 
    def iter_children( self ):
-      return [ WrappedDIE( self.unit, x ) for x in self.die ]
+      return [ self.unit.getWrappedDIE( x ) for x in self.die ]
 
    def key( self ):
       return str( self.unit.unitId ) + "_" + str( self.die.offset() )

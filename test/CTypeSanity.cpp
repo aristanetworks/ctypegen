@@ -227,6 +227,21 @@ print_foo( const Foo * foo, char * data, size_t maxlen ) {
 }
 }
 
+namespace Outer {
+    namespace Inner {
+        struct Leaf {
+            int inNamespace;
+        };
+    }
+}
+
+struct Leaf {
+    int atGlobalScope;
+};
+
+Outer::Inner::Leaf spacedLeaf;
+Leaf globalLeaf;
+
 int
 main( int argc, char * argv[] ) {
    std::cout << *make_foo() << "\n";

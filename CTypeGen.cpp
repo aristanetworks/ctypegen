@@ -32,13 +32,15 @@ typedef struct {
 
 typedef struct {
    PyObject_HEAD
-   const Dwarf::Entry * entry;
+   size_t offset;
+   const Dwarf::Unit *unit;
 } PyDwarfEntry;
 
 typedef struct {
    PyObject_HEAD
-   Dwarf::Entries::const_iterator begin;
-   Dwarf::Entries::const_iterator end;
+   const Dwarf::Unit *unit;
+   Dwarf::DIEIter begin;
+   Dwarf::DIEIter end;
 } PyDwarfEntryIterator;
 
 static void
@@ -54,8 +56,8 @@ pyDwarfEntryFree( PyObject * o ) {}
 static void
 pyDwarfEntryIteratorFree( PyObject * o ) {
    PyDwarfEntryIterator * it = ( PyDwarfEntryIterator * )o;
-   it->begin.Dwarf::Entries::const_iterator::~const_iterator();
-   it->end.Dwarf::Entries::const_iterator::~const_iterator();
+   it->begin.Dwarf::DIEIter::~DIEIter();
+   it->end.Dwarf::DIEIter::~DIEIter();
 }
 
 static PyTypeObject elfObjectType = { PyObject_HEAD_INIT( 0 ) 0 };
@@ -87,9 +89,10 @@ open( PyObject * self, PyObject * args ) {
 }
 
 static PyObject *
-makeEntry( const Dwarf::Entry * ent ) {
+makeEntry(const Dwarf::DIE &die) {
    PyDwarfEntry * value = PyObject_New( PyDwarfEntry, &dwarfEntryType );
-   value->entry = ent;
+   value->offset = die.getOffset();
+   value->unit = die.getUnit();
    return ( PyObject * )value;
 }
 
@@ -101,7 +104,7 @@ units( PyObject * self, PyObject * args ) {
       PyObject * result = PyList_New( units.size() );
       size_t i = 0;
       for ( auto unit : units )
-         PyList_SetItem( result, i++, makeEntry( &*unit->entries.begin() ) );
+         PyList_SetItem( result, i++, makeEntry( *unit->topLevelDIEs().begin() ) );
       return result;
    }
    catch ( const std::exception &ex ) {
@@ -113,7 +116,43 @@ units( PyObject * self, PyObject * args ) {
 static PyObject *
 entry_type( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   return PyLong_FromLong( ent->entry->type->tag );
+   auto die = ent->unit->offsetToDIE(ent->offset);
+   return PyLong_FromLong( die.tag() );
+}
+
+static PyObject *
+entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
+   PyDwarfEntry * lhs = ( PyDwarfEntry * )lhso;
+   PyDwarfEntry * rhs = ( PyDwarfEntry * )rhso;
+
+
+   auto diff = lhs->unit->offset - rhs->unit->offset;
+   if (diff == 0)
+       diff = lhs->offset - rhs->offset;
+
+   PyObject *result = Py_NotImplemented;
+#define TF(pyname, oper) case pyname: \
+                result = ( ( diff oper 0 ) ? Py_True : Py_False ); break
+   if (Py_TYPE( rhs ) == Py_TYPE( lhs ) ) {
+      switch (op) {
+         TF(Py_EQ, ==);
+         TF(Py_NE, !=);
+         TF(Py_GT, >);
+         TF(Py_GE, >=);
+         TF(Py_LT, <);
+         default:
+            break;
+      }
+   }
+#undef TF
+   Py_INCREF( result );
+   return result;
+}
+
+static long
+entry_hash( PyObject * self ) {
+   PyDwarfEntry * ent = ( PyDwarfEntry * )self;
+   return intptr_t( ent->offset ^ ent->unit->offset );
 }
 
 static PyObject *
@@ -122,10 +161,11 @@ entry_iterator( PyObject * self ) {
       PyDwarfEntry * ent = ( PyDwarfEntry * )self;
       PyDwarfEntryIterator * it = PyObject_New( PyDwarfEntryIterator,
                &dwarfEntryIteratorType );
-      new ( &it->begin ) Dwarf::Entries::const_iterator();
-      new ( &it->end ) Dwarf::Entries::const_iterator();
-      it->begin = ent->entry->children.begin();
-      it->end = ent->entry->children.end();
+      auto die = ent->unit->offsetToDIE(ent->offset);
+      auto list = die.children();
+      new ( &it->begin ) Dwarf::DIEIter(list.begin());
+      new ( &it->end ) Dwarf::DIEIter(list.end());
+      it->unit = ent->unit;
       return ( PyObject * )it;
    }
    catch ( const std::exception &ex ) {
@@ -141,7 +181,7 @@ entryiter_iternext( PyObject * self ) {
       PyErr_SetNone( PyExc_StopIteration );
       return nullptr;
    }
-   auto rv = makeEntry( &*it->begin );
+   auto rv = makeEntry( *it->begin );
    ++it->begin;
    return rv;
 }
@@ -160,86 +200,58 @@ makeString( const std::string & s ) {
 static PyObject *
 entry_offset( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   return PyLong_FromLong( ent->entry->offset );
+   return PyLong_FromLong( ent->offset );
 }
 
 static PyObject *
 entry_file( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   std::string txt = stringify( *ent->entry->unit->dwarf->elf->io );
+   std::string txt = stringify( *ent->unit->dwarf->elf->io );
    return makeString( txt );
-}
-
-/*
- * Generate the text for the scope that this name is in. This currently concats
- * the names of each namespace, struct, etc, between the root of the
- * translation unit and the actual DIE with underscores between them.
- */
-static PyObject *
-entry_scope( PyObject * self, PyObject * args ) {
-   PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   std::ostringstream result;
-   int nsCount = 0;
-   for ( auto entry = ent->entry->parent; entry; entry = entry->parent ) {
-      switch ( entry->type->tag ) {
-       default:
-         break;
-       case Dwarf::DW_TAG_namespace:
-       case Dwarf::DW_TAG_structure_type:
-       case Dwarf::DW_TAG_class_type:
-       case Dwarf::DW_TAG_union_type: {
-         if ( nsCount++ )
-            result << "::";
-         result << entry->name();
-         break;
-       }
-      }
-   }
-   return makeString( result.str() );
 }
 
 static PyObject *
 entry_getattr( PyObject * self, PyObject * args ) {
    try {
-      const Dwarf::Entry * entry = ( ( PyDwarfEntry * )self )->entry;
+      const auto pyEntry = ( PyDwarfEntry * )self;
+      auto entry = pyEntry->unit->offsetToDIE(pyEntry->offset);
       unsigned attrId;
       if ( !PyArg_ParseTuple( args, "I", &attrId ) ) {
          return 0;
       }
-      const Dwarf::Attribute * attr = entry->attrForName( Dwarf::AttrName( attrId ) );
-      if ( attr == nullptr )
+      Dwarf::Attribute attr = entry.attribute( Dwarf::AttrName( attrId ) );
+      if (!attr.valid())
          Py_RETURN_NONE;
-      switch ( attr->form() ) {
+      switch ( attr.form() ) {
        case Dwarf::DW_FORM_addr:
-         return PyLong_FromUnsignedLongLong( uintmax_t( *attr ) );
+         return PyLong_FromUnsignedLongLong( uintmax_t( attr ) );
        case Dwarf::DW_FORM_data1:
        case Dwarf::DW_FORM_data2:
        case Dwarf::DW_FORM_data4:
-         return PyLong_FromLong( intmax_t( *attr ) );
+         return PyLong_FromLong( intmax_t( attr ) );
        case Dwarf::DW_FORM_sdata:
        case Dwarf::DW_FORM_data8:
-         return PyLong_FromLongLong( intmax_t( *attr ) );
+         return PyLong_FromLongLong( intmax_t( attr ) );
        case Dwarf::DW_FORM_udata:
-         return PyLong_FromUnsignedLongLong( uintmax_t( *attr ) );
+         return PyLong_FromUnsignedLongLong( uintmax_t( attr ) );
        case Dwarf::DW_FORM_GNU_strp_alt:
        case Dwarf::DW_FORM_string:
        case Dwarf::DW_FORM_strp:
-         return makeString( std::string( *attr ) );
+         return makeString( std::string( attr ) );
 
        case Dwarf::DW_FORM_ref1:
        case Dwarf::DW_FORM_ref2:
        case Dwarf::DW_FORM_ref4:
        case Dwarf::DW_FORM_ref8:
        case Dwarf::DW_FORM_ref_udata:
-       case Dwarf::DW_FORM_ref_addr: {
-         return makeEntry( entry->referencedEntry( attr->name() ) );
-       }
+       case Dwarf::DW_FORM_ref_addr:
+          return makeEntry( Dwarf::DIE( attr ) );
 
        case Dwarf::DW_FORM_flag_present: {
          Py_RETURN_TRUE;
        }
        case Dwarf::DW_FORM_flag: {
-         if ( bool( *attr ) ) {
+         if ( bool( attr ) ) {
             Py_RETURN_TRUE;
          } else {
             Py_RETURN_FALSE;
@@ -250,7 +262,7 @@ entry_getattr( PyObject * self, PyObject * args ) {
          abort();
          break;
        default:
-         std::clog << "no handler for form " << attr->form() << "in attribute "
+         std::clog << "no handler for form " << attr.form() << "in attribute "
                    << attrId << "\n";
          break;
       }
@@ -275,7 +287,6 @@ static PyMethodDef entryMethods[] = {
    { "offset", entry_offset, METH_VARARGS, "offset of a DIE in DWARF image" },
    { "file", entry_file, METH_VARARGS, "file containing DIE" },
    { "getattr", entry_getattr, METH_VARARGS, "get specific attribute of a DIE" },
-   { "scope", entry_scope, METH_VARARGS, "describe scope of a DIE" },
    { 0, 0, 0, 0 }
 };
 
@@ -345,16 +356,18 @@ initlibCTypeGen( void )
    dwarfEntryType.tp_name = "libCTypeGen.DwarfEntry";
    dwarfEntryType.tp_flags = Py_TPFLAGS_DEFAULT;
    dwarfEntryType.tp_basicsize = sizeof( PyDwarfEntry );
-   dwarfEntryType.tp_doc = "DWARF Entry object";
+   dwarfEntryType.tp_doc = "DWARF DIE object";
    dwarfEntryType.tp_dealloc = pyDwarfEntryFree;
    dwarfEntryType.tp_new = PyType_GenericNew;
    dwarfEntryType.tp_methods = entryMethods;
    dwarfEntryType.tp_iter = entry_iterator;
+   dwarfEntryType.tp_hash = entry_hash;
+   dwarfEntryType.tp_richcompare = entry_compare;
 
    dwarfEntryIteratorType.tp_name = "libCTypeGen.DwarfEntryIterator";
    dwarfEntryIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;
    dwarfEntryIteratorType.tp_basicsize = sizeof( PyDwarfEntryIterator );
-   dwarfEntryIteratorType.tp_doc = "DWARF Entry object iterator";
+   dwarfEntryIteratorType.tp_doc = "DWARF DIE object iterator";
    dwarfEntryIteratorType.tp_dealloc = pyDwarfEntryIteratorFree;
    dwarfEntryIteratorType.tp_new = PyType_GenericNew;
    dwarfEntryIteratorType.tp_iter = entryiter_iter;

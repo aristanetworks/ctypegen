@@ -13,7 +13,7 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-from CTypeGen import generate, PythonType
+from CTypeGen import generate, PythonType, generateOrThrow
 from ctypes import c_char, CDLL, c_void_p, c_long, c_int, cast, sizeof
 from ctypes import POINTER, c_char_p, c_ulong
 import sys
@@ -31,6 +31,8 @@ types = [
       PythonType( "NoSuchType" ), # make sure we get a warning for notype.
       PythonType( "BigNum" ),
       PythonType( "AnonEnumWithTypedef" ),
+      PythonType( "NamespacedLeaf", "Outer::Inner::Leaf" ),
+      PythonType( "GlobalLeaf", "Leaf" ),
 ]
 
 functions = [
@@ -103,7 +105,7 @@ assert "not an ELF" in warnings[ 0 ]
 clearWarnings()
 
 # Now actually generate the module, complete with warnings
-module, generator = generate(
+module, generator = generateOrThrow(
       [ sanitylib ],
       "CTypeSanity.py",
       types,
@@ -143,13 +145,13 @@ def compareObjects( indent, asMap, asCtypes ):
 
 compareObjects( 0, theMap, theCTypes.contents )
 
-# Make sure calling the function pointer works correctly.
+print("Make sure calling the function pointer works correctly.")
 bytwo = theCTypes.contents.aFuncPtr( 4 )
 assert bytwo == 8
 assert module.TheEnum.One == 1
 assert module.TheEnum.Two == 2
 
-# Make sure 64-bit values are generated properly.
+print("Make sure 64-bit values are generated properly.")
 assert theCTypes.contents.bigEnum.value == module.BigNum.Big
 
 # We should be able to create some structures that are declared within
@@ -172,8 +174,14 @@ array = module.Foo().aTwoDimensionalArrayOfLong
 assert sizeof( array[ 0 ] ) == 13 * sizeof( c_long ) # minor axis - 13 elements
 assert sizeof( array ) == 17 * sizeof( array[ 0 ] ) # major axis - 17 elements
 
-# Verify CFUNCTYPE generation
-print ( set( module.functionTypes ) )
+print ("Verify we can specify and disambiguate namespaced and unnamespaced types")
+globl = module.GlobalLeaf()
+namespaced = module.NamespacedLeaf()
+globl.atGlobalScope = 1
+namespaced.inNamespace = 3
+
+
+print("Verify CFUNCTYPE generation")
 assert set( module.functionTypes ) == { "make_foo",
                                         "print_foo",
                                         "void_return_func",
