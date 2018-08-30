@@ -40,19 +40,32 @@ def checkMocked():
 print( "checking the C implementation does what it should before we poke around" )
 checkNotMocked()
 
-# provide a mock our function lib.f in lib.
-@CMock.Mock( lib.f, lib, method=CMock.GOT )
-def mockedF( i, s, iptr ):
+# python function used by the mock of lib.f
+def pythonF( i, s, iptr ):
    print( "mocked function! got args: i(%s)=%d, s(%s)=%s, iptr(%s)=%s" %
            ( type( i ), i, type( s ), s, type( iptr ), iptr[ 0 ] ) )
    iptr[ 0 ] = 101
    return 100
+
+# provide a mock our function lib.f in lib.
+@CMock.Mock( lib.f, lib, method=CMock.GOT )
+def mockedF( i, s, iptr ):
+   return pythonF( i, s, iptr )
 
 print( "checking the mocked behaviour works on installation" )
 checkMocked()
 
 print( "checking we can disable the mock" )
 mockedF.disable()
+checkNotMocked()
+
+print( "check context manager" )
+with CMock.mocked( lib.f, pythonF, method=CMock.GOT ) as mock:
+   checkMocked()
+   mock.disable()
+   checkNotMocked()
+   mock.enable()
+   checkMocked()
 checkNotMocked()
 
 print( "checking we can re-enable the mock" )

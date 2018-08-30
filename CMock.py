@@ -12,10 +12,12 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
+import sys
 from ctypes import CDLL, CFUNCTYPE, c_void_p
 import libCTypeMock
 import site
 import glob
+from contextlib import contextmanager
 
 GOT = 1
 STOMP = 2
@@ -64,3 +66,10 @@ class Mock( object ):
       toMock.enable = lambda: self.mock.enable()
       callbacks.append( ( callback, toMock ) )
       return toMock
+
+@contextmanager
+def mocked(function, mock, *args, **kwargs):
+   ''' Context manager for CMocks '''
+   mock = Mock(function, *args, **kwargs)(mock)
+   yield mock
+   mock.disable()
