@@ -149,7 +149,12 @@ entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
    return result;
 }
 
+
+#if PY_MAJOR_VERSION >= 3
+static Py_hash_t
+#else
 static long
+#endif
 entry_hash( PyObject * self ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
    return intptr_t( ent->offset ^ ent->unit->offset );
