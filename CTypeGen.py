@@ -492,7 +492,7 @@ class PrimitiveType( Type ):
          u"long unsigned int" : u"c_ulong",
          u"short unsigned int" : u"c_ushort",
          u"unsigned int" : u"c_uint",
-         u"unsigned char" : u"c_byte",
+         u"unsigned char" : u"c_ubyte",
          u"signed char" : u"c_char",
          u"char" : u"c_char",
          u"long int" : u"c_long",
