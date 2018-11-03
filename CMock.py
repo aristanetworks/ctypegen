@@ -14,10 +14,12 @@
 
 import sys
 from ctypes import CDLL, CFUNCTYPE, c_void_p
-import libCTypeMock
 import site
 import glob
 from contextlib import contextmanager
+import libCTypeMock
+
+# We need to look inside ctypes a bit, so, pylint: disable=protected-access
 
 GOT = 1
 STOMP = 2
@@ -30,7 +32,7 @@ for sitedir in site.getsitepackages():
       try:
          cmockCdll = CDLL( libName )
          break
-      except:
+      except OSError:
          pass
 
 assert cmockCdll
@@ -45,7 +47,7 @@ class Mock( object ):
    argtypes set on it correctly, and the python "mock" function you decorate
    should conform to that. CTypeGen can do this with decorateFunctions '''
 
-   def __init__( self, function, inlib=None, forlibs=None, method=GOT,
+   def __init__( self, function, inlib=None, forlibs=None, method=None,
            linkername = None ):
       self.forlibs = forlibs
       self.inlib = inlib
@@ -64,6 +66,7 @@ class Mock( object ):
       else:
          self.method = method
       self.linkername = linkername
+      self.mock = None
 
    def __call__( self, toMock ):
       if self.linkername is None:
@@ -75,8 +78,8 @@ class Mock( object ):
       else:
          self.mock = libCTypeMock.StompMock( self.linkername, callbackForC,
                  self.inlib._handle if self.inlib else 0)
-      toMock.disable = lambda: self.mock.disable()
-      toMock.enable = lambda: self.mock.enable()
+      toMock.disable = self.mock.disable
+      toMock.enable = self.mock.enable
       callbacks.append( ( callback, toMock ) )
       return toMock
 

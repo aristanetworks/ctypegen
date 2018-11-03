@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2018 Arista Networks.
+# Copyright 2017 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-
-from CTypeGen import generate, PythonType, generateOrThrow
+from __future__ import print_function
 from ctypes import c_char, CDLL, c_void_p, c_long, c_int, cast, sizeof
 from ctypes import POINTER, c_char_p, c_ulong
 import sys
+
+from CTypeGen import generate, PythonType, generateOrThrow
 
 if len(sys.argv) >= 2:
    sanitylib = sys.argv[1]
@@ -24,15 +25,16 @@ else:
    sanitylib = ".libs/libCTypeSanity.so"
 
 types = [
-      PythonType( "Foo" )
-         .field( "anEnum", typename="TheEnum" )
-         .field( "anonymousStructField", typename="AnonymousStructType" )
-         .field( "anArrayField", typename="ArrayFieldType" ),
+      PythonType( u"Foo" )
+         .field( u"anEnum", typename=u"TheEnum" )
+         .field( u"anonymousStructField", typename=u"AnonymousStructType" )
+         .field( u"anArrayField", typename=u"ArrayFieldType" ),
       PythonType( "NoSuchType" ), # make sure we get a warning for notype.
-      PythonType( "BigNum" ),
-      PythonType( "AnonEnumWithTypedef" ),
-      PythonType( "NamespacedLeaf", "Outer::Inner::Leaf" ),
-      PythonType( "GlobalLeaf", "Leaf" ),
+      PythonType( u"BigNum" ),
+      PythonType( u"AnonEnumWithTypedef" ),
+      PythonType( u"NamespacedLeaf", "Outer::Inner::Leaf" ),
+      PythonType( u"GlobalLeaf", "Leaf" ),
+      PythonType( u"NameSharedWithStructAndTypedef" ),
 ]
 
 functions = [
@@ -46,7 +48,8 @@ functions = [
 globalVars = [
        "ExternalStrings",
        "ExternalStruct",
-       "NoSuchGlobal"
+       "NoSuchGlobal",
+       "nameSharedWithStructAndTypedef",
 ]
 
 warnCount = 0
@@ -117,13 +120,13 @@ for warning in warnings:
    assert "nosuch" in warning.lower() # expect three warnings about missing things
 clearWarnings()
 
-dll = CDLL( "./CTypeSanity" )
+dll = CDLL( sanitylib )
 module.decorateFunctions( dll )
 theCTypes = dll.make_foo()
 
 s = ( c_char * 1024 )()
 dll.print_foo( theCTypes, s, 1024 )
-theMap = eval( s.value )
+theMap = eval( s.value ) # We generate the text, so safe to pylint: disable=eval-used
 
 def compareObjects( indent, asMap, asCtypes ):
    for k, v in asMap.items():
@@ -137,9 +140,9 @@ def compareObjects( indent, asMap, asCtypes ):
          assert abs( v - cval ) < 0.005
       elif isinstance( cval, bytes ):
          try:
-            assert str( cval, 'utf-8' ) == v
-         except:
-            assert cval == v
+            assert str( cval, 'utf-8' ) == v # python 3
+         except TypeError:
+            assert cval == v # python 2
       else:
          assert cval == v or cast( cval, c_void_p ).value == v
 
@@ -203,4 +206,4 @@ assert methodType._argtypes_ == ( POINTER( module.Foo ),
 methodType = module.functionTypes[ "void_return_func" ]
 assert methodType.__class__.__name__ == "PyCFuncPtrType"
 assert methodType._restype_ is None
-assert methodType._argtypes_ is ()
+assert methodType._argtypes_ == ()

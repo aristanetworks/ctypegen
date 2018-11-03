@@ -12,10 +12,12 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-from CTypeGen import generate
-import CMock
+from __future__ import print_function
+
 import sys
 from ctypes import CDLL
+from CTypeGen import generate
+import CMock
 
 if len(sys.argv) >= 2:
    mocklib = sys.argv[1]

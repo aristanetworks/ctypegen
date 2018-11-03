@@ -1,5 +1,5 @@
 /*
-   Copyright 2018 Arista Networks.
+   Copyright 2017 Arista Networks.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -15,12 +15,83 @@
 */
 
 #include <Python.h>
+
 #include <iostream>
+#include <deque>
 #include <memory>
+#include <set>
+#include <sstream>
+#include <vector>
+
 #include <libpstack/elf.h>
 #include <libpstack/dwarf.h>
-#include <iostream>
-#include <sstream>
+
+static std::set<Dwarf::Tag> namespacetags = {
+   Dwarf::DW_TAG_structure_type,
+   Dwarf::DW_TAG_namespace,
+   Dwarf::DW_TAG_class_type,
+   Dwarf::DW_TAG_union_type,
+};
+
+static std::string
+dieName(const Dwarf::DIE &die)
+{
+   const auto &name = die.attribute(Dwarf::DW_AT_name);
+   if (name.valid())
+      return std::string(name);
+   std::ostringstream os;
+   os << "anon_" << die.getOffset();
+   return os.str();
+}
+
+template <typename container> static void
+getFullName(const Dwarf::DIE &die, container &fullname, bool leaf = true)
+{
+   if (die.getParentOffset() != 0) {
+      const auto &parent = die.getUnit()->offsetToDIE(die.getParentOffset());
+      getFullName(parent, fullname, false);
+   }
+   if (leaf || namespacetags.find(die.tag()) != namespacetags.end()) {
+      fullname.push_back(dieName(die));
+   }
+}
+
+template<typename T>
+static Dwarf::DIE
+findDefinition( const Dwarf::DIE &die,
+      Dwarf::Tag tag,
+      typename T::iterator first,
+      typename T::iterator end )
+{
+   const auto &nameA = die.attribute(Dwarf::DW_AT_name);
+   const bool sameName = nameA.valid() && std::string(nameA) == *first;
+
+   if (end - first == 1) {
+      const auto &declA = die.attribute( Dwarf::DW_AT_declaration );
+      if ( nameA.valid() && sameName && !bool( declA ) && tag == die.tag()  )
+         return die;
+   }
+   switch (die.tag()) {
+      case Dwarf::DW_TAG_namespace:
+      case Dwarf::DW_TAG_structure_type:
+      case Dwarf::DW_TAG_class_type:
+         if ( !sameName )
+            return Dwarf::DIE();
+         first++;
+         // FALLTHROUGH
+
+      case Dwarf::DW_TAG_compile_unit:
+         for ( const auto c : die.children() ) {
+            const auto ischild = findDefinition<T>( c, tag, first, end );
+            if (ischild)
+               return ischild;
+         }
+         break;
+      default:
+         break;
+   }
+   return Dwarf::DIE();
+}
 
 extern "C" {
 
@@ -32,8 +103,7 @@ typedef struct {
 
 typedef struct {
    PyObject_HEAD
-   size_t offset;
-   const Dwarf::Unit *unit;
+   Dwarf::DIE die;
 } PyDwarfEntry;
 
 typedef struct {
@@ -51,7 +121,8 @@ pyElfObjectFree( PyObject * o ) {
 }
 
 static void
-pyDwarfEntryFree( PyObject * o ) {}
+pyDwarfEntryFree( PyObject * o ) {
+}
 
 static void
 pyDwarfEntryIteratorFree( PyObject * o ) {
@@ -91,16 +162,15 @@ open( PyObject * self, PyObject * args ) {
 static PyObject *
 makeEntry(const Dwarf::DIE &die) {
    PyDwarfEntry * value = PyObject_New( PyDwarfEntry, &dwarfEntryType );
-   value->offset = die.getOffset();
-   value->unit = die.getUnit();
+   value->die = die;
    return ( PyObject * )value;
 }
 
 static PyObject *
-units( PyObject * self, PyObject * args ) {
+elf_units( PyObject * self, PyObject * args ) {
    try {
       PyElfObject * pye = ( PyElfObject * )self;
-      auto units = pye->dwarf->getUnits();
+      const auto &units = pye->dwarf->getUnits();
       PyObject * result = PyList_New( units.size() );
       size_t i = 0;
       for ( auto unit : units )
@@ -114,21 +184,45 @@ units( PyObject * self, PyObject * args ) {
 }
 
 static PyObject *
+elf_findDefinition( PyObject * self, PyObject * args ) {
+   PyDwarfEntry *die;
+   PyElfObject *elf = (PyElfObject *)self;
+   if ( !PyArg_ParseTuple( args, "O", &die ) )
+      return 0;
+   std::vector<std::string> namelist;
+   getFullName(die->die, namelist);
+   for ( const auto &u : elf->dwarf->getUnits() ) {
+      for (const auto &tld : u->topLevelDIEs()) {
+         const auto &defn = findDefinition<std::vector<std::string>>(
+               tld, die->die.tag(), namelist.begin(), namelist.end() );
+         if (defn)
+            return makeEntry( defn );
+      }
+   }
+   Py_INCREF( Py_None );
+   return Py_None;
+}
+
+static PyObject *
 entry_type( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   auto die = ent->unit->offsetToDIE(ent->offset);
-   return PyLong_FromLong( die.tag() );
+   return PyLong_FromLong( ent->die.tag() );
 }
 
 static PyObject *
 entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
+   if ( Py_TYPE( rhso ) != &dwarfEntryType ) {
+      Py_INCREF( Py_False );
+      return Py_False;
+   }
+
    PyDwarfEntry * lhs = ( PyDwarfEntry * )lhso;
    PyDwarfEntry * rhs = ( PyDwarfEntry * )rhso;
 
 
-   auto diff = lhs->unit->offset - rhs->unit->offset;
+   auto diff = lhs->die.getUnit()->offset - rhs->die.getUnit()->offset;
    if (diff == 0)
-       diff = lhs->offset - rhs->offset;
+       diff = lhs->die.getOffset() - rhs->die.getOffset();
 
    PyObject *result = Py_NotImplemented;
 #define TF(pyname, oper) case pyname: \
@@ -157,7 +251,7 @@ static long
 #endif
 entry_hash( PyObject * self ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   return intptr_t( ent->offset ^ ent->unit->offset );
+   return intptr_t( ent->die.getOffset() ^ ent->die.getUnit()->offset );
 }
 
 static PyObject *
@@ -166,11 +260,10 @@ entry_iterator( PyObject * self ) {
       PyDwarfEntry * ent = ( PyDwarfEntry * )self;
       PyDwarfEntryIterator * it = PyObject_New( PyDwarfEntryIterator,
                &dwarfEntryIteratorType );
-      auto die = ent->unit->offsetToDIE(ent->offset);
-      auto list = die.children();
+      auto list = ent->die.children();
       new ( &it->begin ) Dwarf::DIEIter(list.begin());
       new ( &it->end ) Dwarf::DIEIter(list.end());
-      it->unit = ent->unit;
+      it->unit = ent->die.getUnit();
       return ( PyObject * )it;
    }
    catch ( const std::exception &ex ) {
@@ -203,28 +296,44 @@ makeString( const std::string & s ) {
 }
 
 static PyObject *
+entry_fullname( PyObject * self, PyObject * args ) {
+   std::deque<std::string> namelist;
+   PyDwarfEntry * ent = ( PyDwarfEntry * )self;
+   const auto &die = ent->die;
+   getFullName(die, namelist);
+   auto tuple = PyTuple_New(namelist.size());
+   size_t i = 0;
+   for (const auto &item : namelist) {
+      PyTuple_SET_ITEM(tuple, i, makeString(item));
+      i++;
+   }
+   return tuple;
+}
+
+static PyObject *
+entry_name( PyObject * self, PyObject * args ) {
+   PyDwarfEntry * ent = ( PyDwarfEntry * )self;
+   return makeString(dieName(ent->die));
+}
+
+static PyObject *
 entry_offset( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   return PyLong_FromLong( ent->offset );
+   return PyLong_FromLong( ent->die.getOffset() );
 }
 
 static PyObject *
 entry_file( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   std::string txt = stringify( *ent->unit->dwarf->elf->io );
+   std::string txt = stringify( *ent->die.getUnit()->dwarf->elf->io );
    return makeString( txt );
 }
 
 static PyObject *
-entry_getattr( PyObject * self, PyObject * args ) {
+entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
    try {
       const auto pyEntry = ( PyDwarfEntry * )self;
-      auto entry = pyEntry->unit->offsetToDIE(pyEntry->offset);
-      unsigned attrId;
-      if ( !PyArg_ParseTuple( args, "I", &attrId ) ) {
-         return 0;
-      }
-      Dwarf::Attribute attr = entry.attribute( Dwarf::AttrName( attrId ) );
+      const auto &attr = pyEntry->die.attribute( Dwarf::AttrName( idx ) );
       if (!attr.valid())
          Py_RETURN_NONE;
       switch ( attr.form() ) {
@@ -249,26 +358,23 @@ entry_getattr( PyObject * self, PyObject * args ) {
        case Dwarf::DW_FORM_ref4:
        case Dwarf::DW_FORM_ref8:
        case Dwarf::DW_FORM_ref_udata:
+       case Dwarf::DW_FORM_GNU_ref_alt:
        case Dwarf::DW_FORM_ref_addr:
-          return makeEntry( Dwarf::DIE( attr ) );
+         return makeEntry( Dwarf::DIE( attr ) );
 
-       case Dwarf::DW_FORM_flag_present: {
+       case Dwarf::DW_FORM_flag_present:
          Py_RETURN_TRUE;
-       }
-       case Dwarf::DW_FORM_flag: {
+
+       case Dwarf::DW_FORM_flag:
          if ( bool( attr ) ) {
             Py_RETURN_TRUE;
          } else {
             Py_RETURN_FALSE;
          }
-       }
 
-       case Dwarf::DW_FORM_GNU_ref_alt:
-         abort();
-         break;
        default:
          std::clog << "no handler for form " << attr.form() << "in attribute "
-                   << attrId << "\n";
+                   << idx << "\n";
          break;
       }
       Py_RETURN_NONE;
@@ -278,12 +384,22 @@ entry_getattr( PyObject * self, PyObject * args ) {
    }
 }
 
+static PyObject *
+entry_getattr( PyObject * self, PyObject * args ) {
+   unsigned attrId;
+   if ( !PyArg_ParseTuple( args, "I", &attrId ) )
+      return 0;
+   return entry_getattr_idx( self, attrId );
+}
+
 static PyMethodDef GenTypeMethods[] = {
    { "open", open, METH_VARARGS, "open an ELF file to process" }, { 0, 0, 0, 0 }
 };
 
 static PyMethodDef elfMethods[] = {
-   { "units", units, METH_VARARGS, "get a list of unit-level DWARF entries" },
+   { "units", elf_units, METH_VARARGS, "get a list of unit-level DWARF entries" },
+   { "findDefinition", elf_findDefinition, METH_VARARGS,
+      "Given a DIE for a declaration, find a definition DIE with the same name" },
    { 0, 0, 0, 0 }
 };
 
@@ -292,7 +408,16 @@ static PyMethodDef entryMethods[] = {
    { "offset", entry_offset, METH_VARARGS, "offset of a DIE in DWARF image" },
    { "file", entry_file, METH_VARARGS, "file containing DIE" },
    { "getattr", entry_getattr, METH_VARARGS, "get specific attribute of a DIE" },
+   { "name", entry_name, METH_VARARGS, "get full name of a DIE" },
+   { "fullname", entry_fullname, METH_VARARGS, "get full name of a DIE" },
    { 0, 0, 0, 0 }
+};
+
+static PySequenceMethods entry_sequence = {
+   nullptr,
+   nullptr,
+   nullptr,
+   entry_getattr_idx
 };
 
 PyMODINIT_FUNC
@@ -368,6 +493,7 @@ initlibCTypeGen( void )
    dwarfEntryType.tp_iter = entry_iterator;
    dwarfEntryType.tp_hash = entry_hash;
    dwarfEntryType.tp_richcompare = entry_compare;
+   dwarfEntryType.tp_as_sequence = &entry_sequence;
 
    dwarfEntryIteratorType.tp_name = "libCTypeGen.DwarfEntryIterator";
    dwarfEntryIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;

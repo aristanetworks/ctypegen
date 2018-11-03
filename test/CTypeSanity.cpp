@@ -1,5 +1,5 @@
 /*
-   Copyright 2018 Arista Networks.
+   Copyright 2017 Arista Networks.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -238,6 +238,12 @@ namespace Outer {
 struct Leaf {
     int atGlobalScope;
 };
+
+typedef struct NameSharedWithStructAndTypedef {
+   int bang;
+} NameSharedWithStructAndTypedef;
+
+NameSharedWithStructAndTypedef nameSharedWithStructAndTypedef;
 
 Outer::Inner::Leaf spacedLeaf;
 Leaf globalLeaf;

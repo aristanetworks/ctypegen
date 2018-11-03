@@ -179,8 +179,8 @@ GOTMock::disable() {
  * Process a single library's relocation information
  */
 void
-GOTMock::processLibrary( const char *libname, ElfW( Dyn ) *dynamic, ElfW( Addr ) loadaddr,
-      const char *function, void *thunk ) {
+GOTMock::processLibrary( const char *libname, ElfW( Dyn ) *dynamic,
+      ElfW( Addr ) loadaddr, const char *function, void *thunk ) {
 
    int reltype = -1;
    ElfW( Rel ) *relocs = 0;

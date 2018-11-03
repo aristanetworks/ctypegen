@@ -1,4 +1,4 @@
-# Copyright 2018 Arista Networks.
+# Copyright 2017 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -73,15 +73,11 @@ def checkUnalignedPtrs( t ):
          # We'll allow unaligned things that aren't pointers
          continue
 
-      if fname in allowed:
-         # not aligned, has pointers, but explicitly exempted.
-         print( "warning: exempting misaligned field with pointer: " +
-                "%s in %s unaligned - offset=%d [ align error %d ]" %
-                ( fname, t.__name__, field.offset, field.offset % alignment ) )
-         continue
-      # misaligned field that is a/has pointers
-      raise Exception( "unaligned ptr field %s in %s: offset=%d [%d]" % (
-               fname, t.__name__, field.offset, field.offset % alignment ) )
+      # misaligned field that is a/has pointers. This trips up valgrind.
+      if fname not in allowed:
+         raise Exception( "unaligned ptr field %s in %s: offset=%d [%d]" % (
+                          fname, t.__name__, field.offset,
+                          field.offset % alignment ) )
 
 def checkSize( cls ):
    ''' If we've defined the class fully, ensure python and DWARF agree on

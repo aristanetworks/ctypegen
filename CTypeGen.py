@@ -1,4 +1,4 @@
-# Copyright 2018 Arista Networks.
+# Copyright 2017 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,16 +11,16 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-
+from __future__ import print_function
 # CTypeGen generates boilerplate code using python's ctype package to
 # interact with C libraries. See Aid 3558, aka go/ctypegen for the gorey details.
 
-import PyDwarfWrapper
 import datetime
 import io
 import imp
 import inspect
-import libCTypeGen
+
+import libCTypeGen # pylint: disable=import-error
 
 attrs = libCTypeGen.attrs
 tags = libCTypeGen.tags
@@ -31,15 +31,24 @@ try:
 except NameError:
    baseString = str
 
+try:
+    dict.iteritems
+except AttributeError:
+    # Python 3
+    def itervalues(d):
+        return iter(d.values())
+    def iteritems(d):
+        return iter(d.items())
+else:
+    # Python 2
+    def itervalues(d):
+        return d.itervalues()
+    def iteritems(d):
+        return d.iteritems()
+
 # Add explicit dependency on CTypeGen runtime - we need this when we run the
 # sanity check on the generated file.
 # pkgdeps: import CTypeGenRun
-
-def error( txt ):
-   ''' Print message to stdout. We use this for writing errors, and allow
-   it to be overridden for testing.
-   '''
-   print( "error: %s" % txt )
 
 def asPythonId( s ):
    ''' convert an identifier from debug data into a valid DWARF id '''
@@ -82,10 +91,34 @@ class Type( object ):
    ''' An object representing a Dwarf Type. Mostly a wrapper around a DIE. Subclassed
    for structures, unions, functions, etc'''
 
+   __slots__ = [
+         "resolver", "die", "_name", "spec", "defdie"
+   ]
+
    def __init__( self, resolver, die ):
       self.resolver = resolver
+      self._name = "::".join( die.fullname() ) if die else "void"
+      self.spec = None
       self.die = die
-      self._name = die.qualifiedName
+      self.defdie = None
+
+   def definition( self ):
+      if self.defdie:
+         return self.defdie
+      if not self.die[ attrs.DW_AT_declaration ]:
+         self.defdie = self.die
+         return self.defdie
+      for d in self.resolver.dwarves:
+         self.defdie = d.findDefinition( self.die )
+         if self.defdie:
+            return self.defdie
+      self.resolver.errorfunc( "failed to find definition for %s" %
+                              self.die.fullname() )
+      self.defdie = self.die
+      return self.defdie
+
+   def applyHints( self, spec ):
+      self.spec = spec
 
    def dieComment( self ):
       if self.pyName() == self.name():
@@ -109,13 +142,14 @@ class Type( object ):
       arrays are pointers to and arrays of their base type. Typedefs
       and consts modify their base types'''
 
-      baseDie = self.die.getBaseType()
+      baseDie = self.definition()[ attrs.DW_AT_type ]
       if baseDie:
          return self.resolver.dieToType( baseDie )
+      return None
 
    def size( self ):
       ''' The size of the type, as reported via DWARF '''
-      return self.die[ attrs.DW_AT_byte_size ]
+      return self.definition()[ attrs.DW_AT_byte_size ]
 
    def hasName( self ):
       return self._name is not None
@@ -126,7 +160,7 @@ class Type( object ):
       if self._name:
          res = self._name
       else:
-         res = u"anon_%s" % self.die.key()
+         res = u"anon_%s" % self.die.offset()
 
       if self.resolver.pkgname is not None:
          return u'%s.%s' % ( self.resolver.pkgname, res )
@@ -143,6 +177,7 @@ class Type( object ):
    def writeLibUpdates( self, indent, stream ):
       raise Exception( "writeLibUpdates not supported for this type" )
 
+
 class VoidType( Type ):
    ''' A type representing void '''
    def __init__( self, resolver ):
@@ -157,12 +192,10 @@ class FunctionType( Type ):
    pointers in PointerType, and avoid rendering the outer POINTER(),
    which is implied in ctypes for function types. Note this means objects of
    this type don't actually appear as fields in a structure. '''
-   def __init__( self, resolver, die ):
-      super( FunctionType, self ).__init__( resolver, die )
 
    def params( self ):
       ''' return all formal parameters to the function defined herein '''
-      return [ child for child in self.die.iter_children()
+      return [ child for child in self.die
             if child.tag() == tags.DW_TAG_formal_parameter ]
 
    def define( self, out ):
@@ -170,8 +203,8 @@ class FunctionType( Type ):
       if rtype:
          self.resolver.defineType( rtype, out )
       for child in self.params():
-         self.resolver.defineType(
-               self.resolver.dieToType( child.getBaseType() ), out )
+         self.resolver.defineType (
+               self.resolver.dieToType( child[ attrs.DW_AT_type ] ), out )
 
    def size( self ):
       raise Exception( "functions don't have sizes : %s" % self.name() )
@@ -187,7 +220,7 @@ class FunctionType( Type ):
 
       for child in self.params():
          result.write( u", %s\n      " %
-               self.resolver.dieToType( child.getBaseType() ).ctype() )
+               self.resolver.dieToType( child[ attrs.DW_AT_type ] ).ctype() )
       result.write( u")" )
       return result.getvalue()
 
@@ -195,9 +228,6 @@ class FunctionDefType( FunctionType ):
    ''' A type representing a function declaration. We use these DIEs to
    generate the restype and argtypes fields for ctypes, so we can call
    them with type-safety. '''
-
-   def __init__( self, resolver, die ):
-      super( FunctionDefType, self ).__init__( resolver, die )
 
    def writeLibUpdates( self, indent, stream ):
       """Write function's prototype to stream"""
@@ -207,10 +237,10 @@ class FunctionDefType( FunctionType ):
                ( pad( indent ), self.name(), base.ctype() ) )
       args = []
       for child in self.params():
-         baseType = self.resolver.dieToType( child.getBaseType() )
+         baseType = self.resolver.dieToType( child[ attrs.DW_AT_type] )
          args.append( baseType.ctype() )
       stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), self.name() ) )
-      if len( args ):
+      if args:
          sep = u"["
          for arg in args:
             stream.write( u"%s\n%s%s" % ( sep, pad( indent + 3 ), arg ) )
@@ -222,10 +252,10 @@ class FunctionDefType( FunctionType ):
 class Member( object ):
    ''' A single member in a struct, union, class etc. '''
    def __init__( self, die, resolver ):
-      self.die = die
       self.resolver = resolver
       self._name = None
       self.ctypeOverride = None
+      self.die = die
       self.allowUnalignedPtr = False
 
    def setName( self, name ):
@@ -262,13 +292,14 @@ class Member( object ):
             self.die[ attrs.DW_AT_member_location ] is None
 
    def type( self ):
-      return self.resolver.dieToType( self.die.getBaseType() )
+      return self.resolver.dieToType( self.die[ attrs.DW_AT_type ] )
 
    def setCType( self, ctype ):
       self.ctypeOverride = ctype
 
 class MemberType( Type ):
    ''' A struct, class  or union type - anything that has fields. '''
+   __slots__ = [ "members" ]
    def __init__( self, resolver, die ):
       ''' MemberTypes can accept fieldHints - these are the names of types to
       assign to known fields. If those  are found in the type, then the
@@ -277,18 +308,22 @@ class MemberType( Type ):
       fields. '''
       super( MemberType, self ).__init__( resolver, die )
       self.members = []
+
+   def findMembers( self ):
+      if self.members:
+         return
       superCount = 0
-      for field in self.die.iter_children():
+      for field in self.definition():
          tag = field.tag()
          if field[ attrs.DW_AT_external ]:
             continue
          if tag == tags.DW_TAG_inheritance:
-            member = Member( field, resolver )
+            member = Member( field, self.resolver )
             member.setName( u"__super__%d" % superCount )
             superCount += 1
             self.members.append( member )
          elif tag == tags.DW_TAG_member:
-            member = Member( field, resolver )
+            member = Member( field, self.resolver )
             self.members.append( member )
 
          # Ignore things that don't contribute to the CType definition -
@@ -310,12 +345,17 @@ class MemberType( Type ):
             # Ignore these for now ( but types of fields can reference them )
             pass
          else:
-            resolver.error( "unhandled field %s of type %d in %s " %
+            self.resolver.errorfunc( "unhandled field %s of type %d in %s " %
                   ( field.name(), field.tag(), self.name() ) )
 
-   def applyHints( self, fieldHints ):
+   def applyHints( self, spec ):
       ''' For fields with anonymous types, provide python names as hinted by caller
       '''
+      super( MemberType, self ).applyHints( spec )
+      self.findMembers()
+      fieldHints = spec.fieldHints
+      if fieldHints is None:
+         return
       for member in self.members:
          if member.name() in fieldHints:
             hint = fieldHints[ member.name() ]
@@ -327,7 +367,13 @@ class MemberType( Type ):
                if not isinstance( typedesc, PythonType ):
                   typedesc = PythonType( typedesc, None )
                typedesc.cName = member.type().name()
-               self.resolver.addExplicitType( typedesc, member.die.getBaseType() )
+               typedesc.type = member.type()
+
+               memberTypeDIE = member.die[ attrs.DW_AT_type ]
+               typ = self.resolver.dieToType( memberTypeDIE )
+               typ.applyHints( typedesc )
+               # add to names we'll define later
+               self.resolver.requiredTypes.append( typedesc )
 
             # Provide an alternative name for a field in a struct.
             if hint.name:
@@ -348,13 +394,8 @@ class MemberType( Type ):
       ''' Declare a structure - we don't need to know the fields to
       declare it (think forward reference) '''
 
-      base = self.ctype_subclass()
-      user = None
-
-      if self.name() in self.resolver.explicitTypes:
-         user = self.resolver.explicitTypes[ self.name() ]
-         if user.base:
-            base = user.base
+      base = self.ctype_subclass() if self.spec is None or self.spec.base is None \
+            else self.spec.base
 
       out.write( u'\n' )
       # TestableCtypeClass is a mixin defined in CTypeGenRun, and
@@ -362,13 +403,13 @@ class MemberType( Type ):
       # checking. The generated code will perform these tests if run as
       # a stand-alone program.
       out.write( u'class %s( %s, TestableCtypeClass' % ( self.pyName(), base ) )
-      if user and user.mixins:
-         for mixin in user.mixins:
+      if self.spec and self.spec.mixins:
+         for mixin in self.spec.mixins:
             out.write( ', %s' % mixin )
       out.write( u' ):\n' )
       if self.dieComment():
          out.write( u"   %s\n" % self.dieComment() )
-      if user and user.pack:
+      if self.spec and self.spec.pack:
          out.write( u"   _pack_ = 1\n" )
       else:
          out.write( u"   pass\n" )
@@ -377,7 +418,7 @@ class MemberType( Type ):
    def define( self, out ):
       ''' Define a type: we need to render the fields now, so something else
       can include an object of this type, or access a field '''
-      assert not self.die[ attrs.DW_AT_declaration ] and self.name()
+      self.findMembers()
       self.resolver.declareType( self, out ) # make sure we're declared first.
 
       # Make sure the types of all fields are defined, so we can instantiate them
@@ -407,8 +448,8 @@ class MemberType( Type ):
 
 class StructType( MemberType ):
    ''' A member type for a structure (or class) '''
-   def __init__( self, resolver, die ):
-      super( StructType, self ).__init__( resolver, die )
+
+   __slots__ = []
 
    def ctype_subclass( self ):
       return u"Structure"
@@ -440,20 +481,17 @@ class StructType( MemberType ):
 
 class UnionType( MemberType ):
    ''' Member type for a union '''
-   def __init__( self, resolver, die ):
-      super( UnionType, self ).__init__( resolver, die )
+   __slots__ = []
 
    def ctype_subclass( self ):
       return u"Union"
 
 class EnumType( Type ):
-   def __init__( self, resolver, die ):
-      super( EnumType, self ).__init__( resolver, die )
+   __slots__ = []
 
    def define( self, out ):
       indent = ''
-      explicit_def = self.resolver.explicitTypes.get( self.pyName() )
-      nameless = explicit_def and explicit_def.nameless_enum
+      nameless = self.spec and self.spec.nameless_enum
 
       if not nameless:
          out.write( u"class %s( %s ):\n" % ( self.pyName(), self.intType() ) )
@@ -461,7 +499,7 @@ class EnumType( Type ):
       else:
          out.write( u'# Values of %s (nameless enum)\n' % self.pyName() )
 
-      for child in self.die.iter_children():
+      for child in self.definition():
          if self.dieComment():
             out.write( u"%s%s\n" % ( indent, self.dieComment() ) )
          if child.tag() == tags.DW_TAG_enumerator:
@@ -472,7 +510,7 @@ class EnumType( Type ):
       out.write( u"\n\n" )
 
    def intType( self ):
-      size = self.die[ attrs.DW_AT_byte_size ]
+      size = self.definition()[ attrs.DW_AT_byte_size ]
       if size == 4:
          return u"c_uint32"
       if size == 8:
@@ -486,6 +524,7 @@ class EnumType( Type ):
 
 class PrimitiveType( Type ):
    ''' Primitive types from DWARF/C: map to a python ctype primitive '''
+   __slots__ = []
    baseTypes = {
          u"long long unsigned int" : u"c_ulonglong",
          u"long long int" : u"c_longlong",
@@ -506,9 +545,6 @@ class PrimitiveType( Type ):
          u"wchar_t" : u"c_wchar",
    }
 
-   def __init__( self, resolver, die ):
-      super( PrimitiveType, self ).__init__( resolver, die )
-
    def name( self ):
       return self.ctype()
 
@@ -519,11 +555,12 @@ class PrimitiveType( Type ):
       return PrimitiveType.baseTypes[ name ]
 
 class ArrayType( Type ):
+   __slots__ = [ "dimensions" ]
    def __init__( self, resolver, die ):
       ''' Find all the array's dimensions so we can calculate size, and ctype '''
       super( ArrayType, self ).__init__( resolver, die )
       self.dimensions = []
-      for child in reversed( die.iter_children() ):
+      for child in reversed( [ c for c in self.definition() ] ):
          if child.tag() == tags.DW_TAG_subrange_type:
             upper = child[ attrs.DW_AT_upper_bound ]
             if upper is None:
@@ -547,10 +584,7 @@ class ArrayType( Type ):
       return size
 
 class PointerType( Type ):
-   def __init__( self, resolver, die ):
-      super( PointerType, self ).__init__( resolver, die )
-      # Make sure the base type exists.
-      self.baseType()
+   __slots__ = []
 
    def declare( self, out ):
       self.resolver.declareType( self.baseType(), out )
@@ -559,7 +593,7 @@ class PointerType( Type ):
       self.resolver.declareType( self.baseType(), out )
 
    def ctype( self ):
-      baseDie = self.die.getBaseType()
+      baseDie = self.definition()[ attrs.DW_AT_type ]
       if not baseDie:
          return u"c_void_p"
       baseCtype = self.baseType().ctype()
@@ -574,9 +608,14 @@ class Typedef( Type ):
    ''' Typedefs are basic types that alias others. When delcaring/defining, we just
    declare/define the underlying type, and create an alias with a python
    assignment.'''
+   __slots__ = []
    def __init__( self, resolver, die ):
       super( Typedef, self ).__init__( resolver, die )
-      resolver.dieToType( self.die.getBaseType() )
+      self.baseType()
+
+   def applyHints( self, spec ):
+      super( Typedef, self ).applyHints( spec )
+      self.baseType().applyHints( spec )
 
    def define( self, out ):
       self.resolver.defineType( self.baseType(), out )
@@ -593,18 +632,18 @@ class Typedef( Type ):
          sep = u' \\\n   '
       else:
          sep = u' '
-      out.write( u'%s =%s%s%s\n' % ( name, sep, ctype, self.dieComment() ) )
+      out.write( u'%s = %s%s%s # typedef\n' %
+                 ( name, sep, ctype, self.dieComment() ) )
 
    def size( self ):
-      return self.resolver.dieToType( self.die.getBaseType() ).size()
+      return self.baseType().size()
 
 class ModifierType( Type ):
    ''' Modifier types represent things like volatile, const, etc. These
    don't really have an effect on ctypes, but we render them for
    documentation purposes. '''
 
-   def __init__( self, resolver, die ):
-      super( ModifierType, self ).__init__( resolver, die )
+   __slots__ = []
 
    def size( self ):
       return self.baseType().size()
@@ -619,31 +658,26 @@ class ModifierType( Type ):
       self.resolver.defineType( self.baseType(), out )
 
 class ConstType( ModifierType ):
-   def __init__( self, resolver, die ):
-      super( ConstType, self ).__init__( resolver, die )
-
+   __slots__ = []
    def ctype( self ):
       base = self.baseType()
       name = base.ctype() if base is not None else u"c_void_p"
       return u"CONST( %s )" % name
 
 class VolatileType( ModifierType ):
-   def __init__( self, resolver, die ):
-      super( VolatileType, self ).__init__( resolver, die )
-
+   __slots__ = []
    def ctype( self ):
       return u"VOLATILE( %s )" % self.baseType().ctype()
 
 class RestrictType( ModifierType ):
-   def __init__( self, resolver, die ):
-      super( RestrictType, self ).__init__( resolver, die )
-
+   __slots__ = []
    def ctype( self ):
       return u"RESTRICT( %s )" % self.baseType().ctype()
 
 typeFromTag = {
       tags.DW_TAG_typedef : Typedef,
       tags.DW_TAG_pointer_type : PointerType,
+      tags.DW_TAG_reference_type : PointerType, # just pretend.
       tags.DW_TAG_subroutine_type : FunctionType,
       tags.DW_TAG_structure_type : StructType,
       tags.DW_TAG_class_type : StructType,
@@ -657,165 +691,255 @@ typeFromTag = {
       tags.DW_TAG_restrict_type : RestrictType,
 }
 
+class Namespace( object ):
+   ''' We use the Namespace object to limits our scanning of the entire DIE tree
+   Each name we are looking for (type, global, function) is in a namespace.
+   We don't decend into namespaces if we're not interested in them'''
+
+   __slots__ = [ "types", "variables", "functions",
+         "subspaces", "parent", "name_", "unresolved", "resolver" ]
+   def __init__( self, parent, resolver, name ):
+      self.types = {}
+      self.variables = {}
+      self.functions = {}
+      self.subspaces = {}
+      self.parent = parent
+      self.name_ = name
+      self.unresolved = 0
+      self.resolver = resolver
+
+   def recurse( self, func ):
+      func( self )
+      for subns in itervalues(self.subspaces):
+         subns.recurse( func )
+
+   def depth( self ):
+      if self.parent is None:
+         return 0
+      else:
+         return 1 + self.parent.depth()
+
+   def name( self ):
+      if self.parent:
+         if self.parent.parent:
+            return self.parent.name() + "::" + self.name_
+         return self.name_
+      return None
+
+   def incUnresolved( self ):
+      if self.unresolved == 0 and self.parent:
+         self.parent.incUnresolved()
+      self.unresolved += 1
+
+   def decUnresolved( self ):
+      self.unresolved -= 1
+      if self.unresolved == 0:
+         if self.parent is None:
+            return True
+         else:
+            return self.parent.decUnresolved()
+      else:
+         return False
+
+
+   def addToSet( self, nameList, accessor ):
+      thisName = nameList[ 0 ]
+      if len( nameList ) == 1:
+         container, value = accessor( self )
+         if thisName in container:
+            self.resolver.errorfunc( "duplicate name: %s" % thisName )
+         else:
+            container[ thisName ] = value
+            self.incUnresolved()
+      else:
+         if not thisName in self.subspaces:
+            self.subspaces[ thisName ] = Namespace( self, self.resolver, thisName )
+         self.subspaces[ thisName ].addToSet( nameList[ 1: ], accessor )
+
+   def addType( self, spec ):
+      self.addToSet( spec.cName.split( "::" ), lambda ns: ( ns.types, spec ) )
+
+   def addVar( self, fqn ):
+      self.addToSet( fqn.split( "::" ), lambda ns: ( ns.variables, None ) )
+
+   def addFunc( self, fqn ):
+      self.addToSet( fqn.split( "::" ), lambda ns: ( ns.functions, None ) )
+
 class TypeResolver( object ):
 
    ''' Construct a python file with a set of Ctypes derived from a
    DWARF-annotated binary '''
 
+   __slots__ = [
+         "dwarves",
+         "typesByDieKey",
+         "declaredTypes",
+         "definedTypes",
+         "pkgname",
+         "existingTypes",
+         "errorfunc",
+         "errors",
+         "rootNamespace",
+         "requiredTypes",
+   ]
+
+   def __init__( self, libnames, requiredTypes, functions, existingTypes,
+         errorfunc = None, globalVars=None ):
+
+      if globalVars is None:
+         globalVars = []
+
+      self.dwarves = [ libCTypeGen.open( libname ) for libname in libnames ]
+      self.typesByDieKey = {}
+      self.declaredTypes = {}
+      self.definedTypes = {}
+      self.pkgname = None
+      self.existingTypes = existingTypes if existingTypes else []
+      self.errorfunc = errorfunc if errorfunc else self.error
+      self.errors = 0
+      self.rootNamespace = Namespace( None, self, None )
+      self.requiredTypes = [ r if isinstance( r, PythonType ) else PythonType( r )
+              for r in requiredTypes ]
+
+      # Add all the name we're interested in.
+      for n in self.requiredTypes:
+         self.rootNamespace.addType( n )
+      for n in globalVars:
+         self.rootNamespace.addVar( n )
+      for n in functions:
+         self.rootNamespace.addFunc( n )
+
+      try:
+         for dwarf in self.dwarves:
+            for u in dwarf.units():
+               self.enumerateDIEs( u, self.examineDIE, self.rootNamespace )
+      except TypeResolver.AllResolved:
+         pass
+
+      # We should now have DIEs for everything we care about. Go through and apply
+      # hints
+      for i in self.requiredTypes:
+         if i.type is None:
+            self.errorfunc( "no type for %s" % i.pythonName )
+            continue
+         i.type.applyHints( i )
+
+
    # These are the named types we can generate definitions for
-   typeDieTags = [
+   typeDieTags = (
          tags.DW_TAG_structure_type,
          tags.DW_TAG_class_type,
          tags.DW_TAG_union_type,
          tags.DW_TAG_enumeration_type,
          tags.DW_TAG_typedef,
-         tags.DW_TAG_subprogram,
-         ]
+         tags.DW_TAG_base_type,
+         )
 
    def dieToType( self, die ):
       ''' Convert a DWARF DIE to a Type object '''
 
-      if not die:
+      if die is None:
          return VoidType( self )
 
-      # If this DIE is a declaration of a type we have a definition for, then
-      # upgrade it to the definition DIE before continuing
-      diename = die[ attrs.DW_AT_name ]
-      if die[ attrs.DW_AT_declaration ] and diename in self.typeDiesByName:
-         die = self.typeDiesByName[ diename ]
+      key = self.dieKey( die )
 
-      # Check our cache of die->Type. We might have it in this module, or in one of
-      # the modules we depend on.
+      if key in self.typesByDieKey:
+         return self.typesByDieKey[ key ]
 
-      if die.key() in self.typesByDie:
-         return self.typesByDie[ die.key() ]
       for existingSet in self.existingTypes:
-         if diename in existingSet.definedTypes:
-            return existingSet.definedTypes[ diename ]
+         if key in existingSet.definedTypes:
+            return existingSet.definedTypes[ key ]
 
       newType = typeFromTag[ die.tag() ]( self, die )
 
-      self.typesByDie[ die.key() ] = newType
+      self.typesByDieKey[ key ] = newType
       return newType
-
-   def dedup( self, typ ):
-      ''' If a type is based on a DIE that is not the preferred DIE for that named
-      type, then return the canonical type for that name.'''
-      if typ is None or not ( typ.resolver == self ):
-         return None
-      if typ.pyName() is None or typ.pyName() not in self.typeDiesByName:
-         return typ
-      newDie = self.typeDiesByName[ typ.pyName() ]
-      if newDie != typ.die:
-         typ = self.dieToType( newDie )
-      return typ
 
    def declareType( self, typ, out ):
       ''' Idempotent wrapper for Type.declare '''
-      typ = self.dedup( typ )
       if typ is None:
          return
-      if typ.pyName() in self.declaredTypes:
+
+      key = self.dieKey( typ.die )
+      if key in self.declaredTypes:
          return
-      self.declaredTypes[ typ.pyName() ] = typ
+      if typ.resolver != self: # DIE in external set.
+         return
+      self.declaredTypes[ key ] = typ
       typ.declare( out )
 
    def defineType( self, typ, out ):
       ''' Idempotent wrapper for Type.define '''
-      typ = self.dedup( typ )
-      if typ is None:
+      if typ is None or typ.die is None:
+         return
+      if typ.resolver != self: # DIE in external set.
          return
 
-      # decl->defn upgrade is now done in dieToType: we don't get declarations here
-      assert not typ.die[ attrs.DW_AT_declaration ]
-      if typ.pyName() not in self.definedTypes:
-         self.definedTypes[ typ.pyName() ] = typ
+      key = self.dieKey( typ.die )
+      if key not in self.definedTypes:
+         self.definedTypes[ key ] = typ
          typ.define( out )
 
-   def findInterestingDIEs( self, handle, die, ctx ):
+   def dieKey( self, die ):
+      return ( die.tag(), die.fullname() )
+
+   def examineDIE( self, handle, die, namespace ):
       ''' Find any potentially interesting dwarf DIEs
       ctx is passed down to child DIEs - we use it to store the current namespace.
       '''
 
       tag = die.tag()
+      if tag == tags.DW_TAG_compile_unit or tag == tags.DW_TAG_partial_unit:
+         # Just decend compile units without affecting any namespace scope
+         return namespace
 
-      name = die[ attrs.DW_AT_name ]
-      if name == None:
-         die.qualifiedName = None
-         return ctx
-      die.qualifiedName = name if ctx == "" else "%s::%s" % ( ctx, name )
+      name = die.name()
+      if name is None:
+         return None # We won't find anything in nested namespaces here.
 
-      # Remember all type DIEs. Prefer definitions to declarations but assume
-      # multiple DIEs of the same name are for the same type in different
-      # translation units.
-      if tag in TypeResolver.typeDieTags and \
-            ( die.qualifiedName not in self.typeDiesByName or
-                  self.typeDiesByName[ die.qualifiedName ][ attrs.DW_AT_declaration ] ):
-         self.typeDiesByName[ die.qualifiedName ] = die
+      if tag == tags.DW_TAG_variable:
+         if name in namespace.variables and namespace.variables[ name ] is None:
+            namespace.variables[ name ] = die
+            namespace.decUnresolved()
+         return None
 
-      # Find any potentially interesting dwarf entries for defined functions.
-      if tag == tags.DW_TAG_subprogram and name in self.functions and \
-            not die[ attrs.DW_AT_declaration ]:
-         self.functionDiesByName[ name ] = die
+      if die[ attrs.DW_AT_declaration ]:
+         return None
 
-      # Find any DIEs for global variables we're interested in
-      if tag == tags.DW_TAG_variable and name in self.globalVars:
-         self.globalVarDiesByName[ name ] = die
-      return die.qualifiedName if isNamespaceTag( tag ) else ctx
+      if tag == tags.DW_TAG_subprogram:
+         if name in namespace.functions and namespace.functions[ name ] is None:
+            namespace.functions[ name ] = die
+            namespace.decUnresolved()
+         return None
+
+      if tag in TypeResolver.typeDieTags:
+         if name in namespace.types and namespace.types[ name ].type is None:
+            namespace.types[ name ].type = self.dieToType( die )
+            namespace.decUnresolved()
+
+      # If its a struct or namespace, and we're interested in any DIEs inside
+      # the namespace, decend it.
+      if  ( tag == tags.DW_TAG_namespace or tag == tags.DW_TAG_structure_type or
+            tag == tags.DW_TAG_class_type )  and name in namespace.subspaces:
+         return namespace.subspaces.get( name )
+      return None
 
    def error( self, txt ):
       self.errors += 1
-      self.errorfunc( txt )
+      print( "error: %s" % txt )
 
-   def __init__( self, libnames, requiredTypes, functions, existingTypes,
-         errorfunc=error, globalVars=None ):
-      self.dwarves = [ PyDwarfWrapper.getDwarfHandle( libname )
-                       for libname in libnames ]
-      self.typesByDie = {}
-      self.globalVars = globalVars if globalVars else []
-      self.globalVarDiesByName = {}
-      self.typeDiesByName = {}
-      self.declaredTypes = {}
-      self.definedTypes = {}
-      self.functionDiesByName = {}
-      self.functions = functions
-      self.pkgname = None
-      self.existingTypes = existingTypes if existingTypes else []
-      self.explicitTypes = {}
-      self.errorfunc = errorfunc
-      self.errors = 0
+   class AllResolved( Exception ):
+      ''' Thrown by enumerateDIEs if we find everything we need early,
+      allowing us to stop without searching all units '''
+      pass
 
-      # Find all DIEs we are potentially interested in
-      for dwarf in self.dwarves:
-         for u in dwarf.getUnits():
-            dwarf.enumerateDIEs( u.getTopDIE(), self.findInterestingDIEs, "" )
-
-      # Check we found anything the user explicitly asked for.
-      for globname in self.globalVars:
-         if globname not in self.globalVarDiesByName:
-            self.error( "no definition for global variable %s" % globname )
-
-      for fname in self.functions:
-         if fname not in self.functionDiesByName:
-            self.error( "no definition for function %s" % fname )
-
-      for user in requiredTypes:
-         if user.cName not in self.typeDiesByName:
-            self.error( "no definition for type '%s'" % user.cName )
-         else:
-            self.addExplicitType( user )
-            if user.fieldHints:
-               user.typeDesc.applyHints( user.fieldHints )
-
-   def addExplicitType( self, user, die=None ):
-      # Get the type descriptor of a type
-      if die is None:
-         die = self.typeDiesByName[ user.cName ]
-      user.typeDesc = self.dieToType( die )
-      typ = user.typeDesc
-      while typ.die.tag() == tags.DW_TAG_typedef:
-         typ = typ.baseType()
-      self.explicitTypes[ typ.name() ] = user
+   def enumerateDIEs( self, die, func, ctx ):
+      ctx = func( self, die, ctx )
+      if self.rootNamespace.unresolved == 0:
+         raise TypeResolver.AllResolved()
+      if ctx is not None:
+         for child in die:
+            self.enumerateDIEs( child, func, ctx )
 
    def write( self, stream ):
       ''' Actually write the python file to a stream '''
@@ -831,38 +955,58 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          stream.write( u"import %s\n" % pkg.pkgname )
       stream.write( u"\n" )
 
-      # Now define each interesting type - other types will be defined as needed
-      for user in self.explicitTypes.values():
-         self.defineType( user.typeDesc, stream )
+      def doNSTypes( ns ):
+         # Define types we wanted.
+         for spec in itervalues(ns.types):
+            self.defineType( spec.type, stream )
 
-      if self.globalVarDiesByName:
-         # Make sure any new types needed for global vars are also defined.
-         stream.write( u"# types for globals:\n" )
-         for t in self.globalVarDiesByName.values():
-            self.defineType( self.dieToType( t.getBaseType() ), stream )
-         stream.write( u"# end types for globals\n" )
+         # Define types for variables we wanted.
+         for name, die in iteritems(ns.variables):
+            if die is None:
+               self.errorfunc( "variable %s not found in namespace %s"
+                              % ( name, ns.name() ) )
+            else:
+               self.defineType( self.dieToType( die[ attrs.DW_AT_type ] ), stream )
 
-         # Now write out a class definition containing an entry for each global
-         # variable.
-         stream.write( u"class Globals(object):\n" )
-         stream.write( u"%sdef __init__(self, dll):\n" % pad( 3 ) )
-         for name, die in self.globalVarDiesByName.items():
-            t = self.dieToType( die.getBaseType() )
+         # define function types we wanted.
+         for name, die in iteritems(ns.functions):
+            if die:
+               self.dieToType( die ).define( stream )
+            else:
+               self.errorfunc( "function %s not found" % name )
+
+      self.rootNamespace.recurse( doNSTypes)
+
+      # Now write out a class definition containing an entry for each global
+      # variable.
+      stream.write( u"class Globals(object):\n" )
+      stream.write( u"%sdef __init__(self, dll):\n" % pad( 3 ) )
+
+      def doGlobalVars( ns ):
+         for name, die in iteritems(ns.variables):
+            if die is None:
+               continue
+            t = self.dieToType( die[ attrs.DW_AT_type ] )
             stream.write( u"%sself.%s = ( %s ).in_dll( dll, '%s' )\n" %
                   ( pad( 6 ), name, t.ctype(), name ) )
 
-      for t in self.functionDiesByName.values():
-         self.dieToType( t ).define( stream )
+      self.rootNamespace.recurse( doGlobalVars )
+
+      stream.write( u"%spass" % pad( 6 ) )
 
       ctypesProtos = {}
 
       stream.write( u'\ndef decorateFunctions( lib ):\n' )
-      if len( self.functionDiesByName ):
-         for funcName, t in self.functionDiesByName.items():
-            self.dieToType( t ).writeLibUpdates( 3, stream )
-            ctypesProtos[ funcName ] = self.dieToType( t ).ctype()
-      else:
-         stream.write( u'   pass\n' )
+      def doFunctions( ns ):
+         for die in itervalues(ns.functions):
+            if not die:
+               continue
+            t = self.dieToType( die )
+            t.writeLibUpdates( 3, stream )
+            ctypesProtos[ t.pyName() ] = t.ctype()
+
+      doFunctions( self.rootNamespace )
+      stream.write( u'   pass\n' )
 
       if ctypesProtos:
          stream.write( u"\nfunctionTypes = {\n" )
@@ -874,10 +1018,12 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 
       # If the python typename is different to the C type name, then just use
       # an assignment.
-      for pytype in self.explicitTypes.values():
-         if pytype.cName != pytype.pythonName:
+      for spec in self.requiredTypes:
+         if spec.type is None:
+            continue
+         if spec.pythonName != spec.type.ctype():
             stream.write( u'%s = %s\n' %
-                  ( pytype.pythonName, pytype.typeDesc.ctype() ) )
+                  ( spec.pythonName, spec.type.ctype() ) )
 
       # Make the whole shebang test itself when run.
       stream.write( u'\nif __name__ == "__main__":\n' )
@@ -903,6 +1049,11 @@ class Hint( object ):
 class PythonType( object ):
    ''' Descriptor for types that caller wants rendered in the output '''
 
+   __slots__ = [
+         "pythonName", "cName", "fieldHints", "pack", "base", "mixins",
+         "nameless_enum", "type"
+         ]
+
    def __init__( self, pythonName, cName=None, base=None, pack=False,
            mixins=None, nameless_enum=False ):
       self.pythonName = pythonName
@@ -912,6 +1063,7 @@ class PythonType( object ):
       self.base = base
       self.mixins = mixins
       self.nameless_enum = nameless_enum
+      self.type = None
 
    def field( self, field, typename=None, name=None, typeOverride=None,
          allowUnaligned=False ):
@@ -921,8 +1073,14 @@ class PythonType( object ):
       return self
 
 
+   def __eq__( self, other ):
+      return self.cName == other.cName
+   def __hash__( self ):
+      return hash( self.cName )
+
+
 def generateOrThrow( binaries, outname, types, functions, header=None, modname=None,
-      existingTypes=None, errorfunc=error, globalVars=None ):
+      existingTypes=None, errorfunc=None, globalVars=None ):
    '''  External interface to generate code from a set of binaries, into a python
    module.
    Parameters:
@@ -975,7 +1133,7 @@ def generateOrThrow( binaries, outname, types, functions, header=None, modname=N
          content.write( header )
       resolver.write( content )
 
-   if modname == None:
+   if modname is None:
       modname = outname.split( "." )[ 0 ]
    mod = imp.load_source( modname, outname )
    mod.test_classes()
@@ -984,13 +1142,14 @@ def generateOrThrow( binaries, outname, types, functions, header=None, modname=N
    return ( mod, resolver )
 
 def generate( binaries, outname, types, functions, header=None, modname=None,
-      existingTypes=None, errorfunc=error, globalVars=None ):
+      existingTypes=None, errorfunc=None, globalVars=None ):
    try:
       return generateOrThrow( binaries, outname, types, functions, header,
                 modname, existingTypes, errorfunc, globalVars )
    except Exception as e: # pylint: disable=broad-except
-      errorfunc( "Fatal error: %s" % e )
+      if errorfunc:
+         errorfunc( "Fatal error: %s" % e )
+      else:
+         print( "Fatal error: %s" % e )
       return None, None
 
-def isNamespaceTag( tag ):
-   return tag in [ tags.DW_TAG_namespace , tags.DW_TAG_structure_type, tags.DW_TAG_class_type ]
