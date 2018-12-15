@@ -19,8 +19,8 @@ import sys
 
 from CTypeGen import generate, PythonType, generateOrThrow
 
-if len(sys.argv) >= 2:
-   sanitylib = sys.argv[1]
+if len( sys.argv ) >= 2:
+   sanitylib = sys.argv[ 1 ]
 else:
    sanitylib = ".libs/libCTypeSanity.so"
 
@@ -148,13 +148,13 @@ def compareObjects( indent, asMap, asCtypes ):
 
 compareObjects( 0, theMap, theCTypes.contents )
 
-print("Make sure calling the function pointer works correctly.")
+print( "Make sure calling the function pointer works correctly." )
 bytwo = theCTypes.contents.aFuncPtr( 4 )
 assert bytwo == 8
 assert module.TheEnum.One == 1
 assert module.TheEnum.Two == 2
 
-print("Make sure 64-bit values are generated properly.")
+print( "Make sure 64-bit values are generated properly." )
 assert theCTypes.contents.bigEnum.value == module.BigNum.Big
 
 # We should be able to create some structures that are declared within
@@ -177,14 +177,16 @@ array = module.Foo().aTwoDimensionalArrayOfLong
 assert sizeof( array[ 0 ] ) == 13 * sizeof( c_long ) # minor axis - 13 elements
 assert sizeof( array ) == 17 * sizeof( array[ 0 ] ) # major axis - 17 elements
 
-print ("Verify we can specify and disambiguate namespaced and unnamespaced types")
+print ( "Verify we can specify and disambiguate namespaced and unnamespaced types" )
 globl = module.GlobalLeaf()
 namespaced = module.NamespacedLeaf()
-globl.atGlobalScope = 1
-namespaced.inNamespace = 3
 
+# Ensure we can assign something to the fields in these leaves: this checks that
+# the right type was found for the two distinct types.
+globl.atGlobalScope = 0
+namespaced.inNamespace = 0
 
-print("Verify CFUNCTYPE generation")
+print( "Verify CFUNCTYPE generation" )
 assert set( module.functionTypes ) == { "make_foo",
                                         "print_foo",
                                         "void_return_func",

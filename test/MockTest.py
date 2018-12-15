@@ -19,8 +19,8 @@ from ctypes import CDLL
 from CTypeGen import generate
 import CMock
 
-if len(sys.argv) >= 2:
-   mocklib = sys.argv[1]
+if len( sys.argv ) >= 2:
+   mocklib = sys.argv[ 1 ]
 else:
    mocklib = ".libs/libMockTest.so"
 

@@ -20,10 +20,12 @@ import io
 import imp
 import inspect
 
+# the following modules are dynamically generated inside the C extension.
+# pylint should ignore them
 import libCTypeGen # pylint: disable=import-error
 
-attrs = libCTypeGen.attrs
 tags = libCTypeGen.tags
+attrs = libCTypeGen.attrs
 
 # python3 doesn't have basestring
 try:
@@ -32,19 +34,21 @@ except NameError:
    baseString = str
 
 try:
-    dict.iteritems
+   dict.iteritems
 except AttributeError:
-    # Python 3
-    def itervalues(d):
-        return iter(d.values())
-    def iteritems(d):
-        return iter(d.items())
+   # Python 3
+   def itervalues( d ):
+      return iter( d.values() )
+
+   def iteritems( d ):
+      return iter( d.items() )
 else:
-    # Python 2
-    def itervalues(d):
-        return d.itervalues()
-    def iteritems(d):
-        return d.iteritems()
+   # Python 2
+   def itervalues( d ):
+      return d.itervalues()
+
+   def iteritems( d ):
+      return d.iteritems()
 
 # Add explicit dependency on CTypeGen runtime - we need this when we run the
 # sanity check on the generated file.
@@ -113,7 +117,7 @@ class Type( object ):
          if self.defdie:
             return self.defdie
       self.resolver.errorfunc( "failed to find definition for %s" %
-                              self.die.fullname() )
+                               self.die.fullname() )
       self.defdie = self.die
       return self.defdie
 
@@ -177,7 +181,6 @@ class Type( object ):
    def writeLibUpdates( self, indent, stream ):
       raise Exception( "writeLibUpdates not supported for this type" )
 
-
 class VoidType( Type ):
    ''' A type representing void '''
    def __init__( self, resolver ):
@@ -203,7 +206,7 @@ class FunctionType( Type ):
       if rtype:
          self.resolver.defineType( rtype, out )
       for child in self.params():
-         self.resolver.defineType (
+         self.resolver.defineType(
                self.resolver.dieToType( child[ attrs.DW_AT_type ] ), out )
 
    def size( self ):
@@ -237,7 +240,7 @@ class FunctionDefType( FunctionType ):
                ( pad( indent ), self.name(), base.ctype() ) )
       args = []
       for child in self.params():
-         baseType = self.resolver.dieToType( child[ attrs.DW_AT_type] )
+         baseType = self.resolver.dieToType( child[ attrs.DW_AT_type ] )
          args.append( baseType.ctype() )
       stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), self.name() ) )
       if args:
@@ -300,6 +303,7 @@ class Member( object ):
 class MemberType( Type ):
    ''' A struct, class  or union type - anything that has fields. '''
    __slots__ = [ "members" ]
+
    def __init__( self, resolver, die ):
       ''' MemberTypes can accept fieldHints - these are the names of types to
       assign to known fields. If those  are found in the type, then the
@@ -346,7 +350,7 @@ class MemberType( Type ):
             pass
          else:
             self.resolver.errorfunc( "unhandled field %s of type %d in %s " %
-                  ( field.name(), field.tag(), self.name() ) )
+                                     ( field.name(), field.tag(), self.name() ) )
 
    def applyHints( self, spec ):
       ''' For fields with anonymous types, provide python names as hinted by caller
@@ -495,7 +499,7 @@ class EnumType( Type ):
 
       if not nameless:
          out.write( u"class %s( %s ):\n" % ( self.pyName(), self.intType() ) )
-         indent = u'\t'
+         indent = pad( 3 )
       else:
          out.write( u'# Values of %s (nameless enum)\n' % self.pyName() )
 
@@ -556,6 +560,7 @@ class PrimitiveType( Type ):
 
 class ArrayType( Type ):
    __slots__ = [ "dimensions" ]
+
    def __init__( self, resolver, die ):
       ''' Find all the array's dimensions so we can calculate size, and ctype '''
       super( ArrayType, self ).__init__( resolver, die )
@@ -609,6 +614,7 @@ class Typedef( Type ):
    declare/define the underlying type, and create an alias with a python
    assignment.'''
    __slots__ = []
+
    def __init__( self, resolver, die ):
       super( Typedef, self ).__init__( resolver, die )
       self.baseType()
@@ -659,6 +665,7 @@ class ModifierType( Type ):
 
 class ConstType( ModifierType ):
    __slots__ = []
+
    def ctype( self ):
       base = self.baseType()
       name = base.ctype() if base is not None else u"c_void_p"
@@ -666,11 +673,13 @@ class ConstType( ModifierType ):
 
 class VolatileType( ModifierType ):
    __slots__ = []
+
    def ctype( self ):
       return u"VOLATILE( %s )" % self.baseType().ctype()
 
 class RestrictType( ModifierType ):
    __slots__ = []
+
    def ctype( self ):
       return u"RESTRICT( %s )" % self.baseType().ctype()
 
@@ -692,12 +701,18 @@ typeFromTag = {
 }
 
 class Namespace( object ):
-   ''' We use the Namespace object to limits our scanning of the entire DIE tree
+   ''' We use the Namespace object to limit our scanning of the entire DIE tree
    Each name we are looking for (type, global, function) is in a namespace.
-   We don't decend into namespaces if we're not interested in them'''
+   We don't decend into namespaces if we're not interested in them
+
+   Each namespace contains a list of types, variables, and functions that
+   we want defined in that namespace, and also a set of subordinate namespaces
+   we are also interested in.
+   '''
 
    __slots__ = [ "types", "variables", "functions",
-         "subspaces", "parent", "name_", "unresolved", "resolver" ]
+         "subspaces", "parent", "name_", "unresolvedCount", "resolver" ]
+
    def __init__( self, parent, resolver, name ):
       self.types = {}
       self.variables = {}
@@ -705,12 +720,12 @@ class Namespace( object ):
       self.subspaces = {}
       self.parent = parent
       self.name_ = name
-      self.unresolved = 0
+      self.unresolvedCount = 0
       self.resolver = resolver
 
    def recurse( self, func ):
       func( self )
-      for subns in itervalues(self.subspaces):
+      for subns in itervalues( self.subspaces ):
          subns.recurse( func )
 
    def depth( self ):
@@ -727,22 +742,31 @@ class Namespace( object ):
       return None
 
    def incUnresolved( self ):
-      if self.unresolved == 0 and self.parent:
+      if self.unresolvedCount == 0 and self.parent:
          self.parent.incUnresolved()
-      self.unresolved += 1
+      self.unresolvedCount += 1
 
    def decUnresolved( self ):
-      self.unresolved -= 1
-      if self.unresolved == 0:
-         if self.parent is None:
-            return True
-         else:
-            return self.parent.decUnresolved()
-      else:
-         return False
-
+      assert self.unresolvedCount > 0
+      self.unresolvedCount -= 1
+      if self.unresolvedCount == 0:
+         if self.parent is not None:
+            self.parent.decUnresolved()
 
    def addToSet( self, nameList, accessor ):
+      ''' add namelist (a list specifying a scoped name) to the namespace.  If
+      the name is of length > 1, then the leaf object exists in a sub-namespace
+      of this one: we recursively ensure that the immediate namespace exists,
+      and pass the suffix of the list down to that namespace.
+
+      When we reach the leaf, the item to add may be a variable, function or
+      type - the accessor provides a way to extract the correct list from the
+      leaf namespace, and the value to insert.
+
+      For vars and functions, we just insert a None object. For types,
+      we leave a pointer to the "spec", i.e., PythonType.
+      '''
+
       thisName = nameList[ 0 ]
       if len( nameList ) == 1:
          container, value = accessor( self )
@@ -754,7 +778,7 @@ class Namespace( object ):
       else:
          if not thisName in self.subspaces:
             self.subspaces[ thisName ] = Namespace( self, self.resolver, thisName )
-         self.subspaces[ thisName ].addToSet( nameList[ 1: ], accessor )
+         self.subspaces[ thisName ].addToSet( nameList[ 1 : ], accessor )
 
    def addType( self, spec ):
       self.addToSet( spec.cName.split( "::" ), lambda ns: ( ns.types, spec ) )
@@ -784,7 +808,7 @@ class TypeResolver( object ):
    ]
 
    def __init__( self, libnames, requiredTypes, functions, existingTypes,
-         errorfunc = None, globalVars=None ):
+         errorfunc=None, globalVars=None ):
 
       if globalVars is None:
          globalVars = []
@@ -801,7 +825,7 @@ class TypeResolver( object ):
       self.requiredTypes = [ r if isinstance( r, PythonType ) else PythonType( r )
               for r in requiredTypes ]
 
-      # Add all the name we're interested in.
+      # Add all the names we're interested in.
       for n in self.requiredTypes:
          self.rootNamespace.addType( n )
       for n in globalVars:
@@ -813,7 +837,7 @@ class TypeResolver( object ):
          for dwarf in self.dwarves:
             for u in dwarf.units():
                self.enumerateDIEs( u, self.examineDIE, self.rootNamespace )
-      except TypeResolver.AllResolved:
+      except StopIteration:
          pass
 
       # We should now have DIEs for everything we care about. Go through and apply
@@ -823,7 +847,6 @@ class TypeResolver( object ):
             self.errorfunc( "no type for %s" % i.pythonName )
             continue
          i.type.applyHints( i )
-
 
    # These are the named types we can generate definitions for
    typeDieTags = (
@@ -863,7 +886,7 @@ class TypeResolver( object ):
       key = self.dieKey( typ.die )
       if key in self.declaredTypes:
          return
-      if typ.resolver != self: # DIE in external set.
+      if typ.resolver != self: # This type came from a different module - use as is
          return
       self.declaredTypes[ key ] = typ
       typ.declare( out )
@@ -872,7 +895,7 @@ class TypeResolver( object ):
       ''' Idempotent wrapper for Type.define '''
       if typ is None or typ.die is None:
          return
-      if typ.resolver != self: # DIE in external set.
+      if typ.resolver != self: # This type came from a different module - use as is
          return
 
       key = self.dieKey( typ.die )
@@ -885,7 +908,11 @@ class TypeResolver( object ):
 
    def examineDIE( self, handle, die, namespace ):
       ''' Find any potentially interesting dwarf DIEs
-      ctx is passed down to child DIEs - we use it to store the current namespace.
+
+      Returns:
+        Namespace: None if we are not interested in the child DIEs, or the
+        namespace associated with this DIE if we are.
+
       '''
 
       tag = die.tag()
@@ -919,8 +946,8 @@ class TypeResolver( object ):
 
       # If its a struct or namespace, and we're interested in any DIEs inside
       # the namespace, decend it.
-      if  ( tag == tags.DW_TAG_namespace or tag == tags.DW_TAG_structure_type or
-            tag == tags.DW_TAG_class_type )  and name in namespace.subspaces:
+      if ( tag == tags.DW_TAG_namespace or tag == tags.DW_TAG_structure_type or
+            tag == tags.DW_TAG_class_type ) and name in namespace.subspaces:
          return namespace.subspaces.get( name )
       return None
 
@@ -928,15 +955,10 @@ class TypeResolver( object ):
       self.errors += 1
       print( "error: %s" % txt )
 
-   class AllResolved( Exception ):
-      ''' Thrown by enumerateDIEs if we find everything we need early,
-      allowing us to stop without searching all units '''
-      pass
-
    def enumerateDIEs( self, die, func, ctx ):
       ctx = func( self, die, ctx )
-      if self.rootNamespace.unresolved == 0:
-         raise TypeResolver.AllResolved()
+      if self.rootNamespace.unresolvedCount == 0:
+         raise StopIteration()
       if ctx is not None:
          for child in die:
             self.enumerateDIEs( child, func, ctx )
@@ -957,25 +979,25 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 
       def doNSTypes( ns ):
          # Define types we wanted.
-         for spec in itervalues(ns.types):
+         for spec in itervalues( ns.types ):
             self.defineType( spec.type, stream )
 
          # Define types for variables we wanted.
-         for name, die in iteritems(ns.variables):
+         for name, die in iteritems( ns.variables ):
             if die is None:
-               self.errorfunc( "variable %s not found in namespace %s"
-                              % ( name, ns.name() ) )
+               self.errorfunc( "variable %s not found in namespace %s" %
+                               ( name, ns.name() ) )
             else:
                self.defineType( self.dieToType( die[ attrs.DW_AT_type ] ), stream )
 
          # define function types we wanted.
-         for name, die in iteritems(ns.functions):
+         for name, die in iteritems( ns.functions ):
             if die:
                self.dieToType( die ).define( stream )
             else:
                self.errorfunc( "function %s not found" % name )
 
-      self.rootNamespace.recurse( doNSTypes)
+      self.rootNamespace.recurse( doNSTypes )
 
       # Now write out a class definition containing an entry for each global
       # variable.
@@ -983,7 +1005,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       stream.write( u"%sdef __init__(self, dll):\n" % pad( 3 ) )
 
       def doGlobalVars( ns ):
-         for name, die in iteritems(ns.variables):
+         for name, die in iteritems( ns.variables ):
             if die is None:
                continue
             t = self.dieToType( die[ attrs.DW_AT_type ] )
@@ -997,8 +1019,9 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       ctypesProtos = {}
 
       stream.write( u'\ndef decorateFunctions( lib ):\n' )
+
       def doFunctions( ns ):
-         for die in itervalues(ns.functions):
+         for die in itervalues( ns.functions ):
             if not die:
                continue
             t = self.dieToType( die )
@@ -1072,12 +1095,11 @@ class PythonType( object ):
       self.fieldHints[ field ] = Hint( typename, name, typeOverride, allowUnaligned )
       return self
 
-
    def __eq__( self, other ):
       return self.cName == other.cName
+
    def __hash__( self ):
       return hash( self.cName )
-
 
 def generateOrThrow( binaries, outname, types, functions, header=None, modname=None,
       existingTypes=None, errorfunc=None, globalVars=None ):
@@ -1103,7 +1125,7 @@ def generateOrThrow( binaries, outname, types, functions, header=None, modname=N
    '''
 
    # Allow binaries to be a single string, or list thereof.
-   if isinstance( binaries,  baseString ):
+   if isinstance( binaries, baseString ):
       binaries = [ binaries ]
    if not isinstance( binaries, list ) or not isinstance(
          binaries[ 0 ], baseString ):
@@ -1152,4 +1174,3 @@ def generate( binaries, outname, types, functions, header=None, modname=None,
       else:
          print( "Fatal error: %s" % e )
       return None, None
-

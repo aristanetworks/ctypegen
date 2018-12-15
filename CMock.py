@@ -48,7 +48,7 @@ class Mock( object ):
    should conform to that. CTypeGen can do this with decorateFunctions '''
 
    def __init__( self, function, inlib=None, forlibs=None, method=None,
-           linkername = None ):
+           linkername=None ):
       self.forlibs = forlibs
       self.inlib = inlib
       try:
@@ -77,15 +77,15 @@ class Mock( object ):
          self.mock = libCTypeMock.GOTMock( self.linkername, callbackForC, 0 )
       else:
          self.mock = libCTypeMock.StompMock( self.linkername, callbackForC,
-                 self.inlib._handle if self.inlib else 0)
+                 self.inlib._handle if self.inlib else 0 )
       toMock.disable = self.mock.disable
       toMock.enable = self.mock.enable
       callbacks.append( ( callback, toMock ) )
       return toMock
 
 @contextmanager
-def mocked(function, mock, *args, **kwargs):
+def mocked( function, mock, *args, **kwargs ):
    ''' Context manager for CMocks '''
-   mock = Mock(function, *args, **kwargs)(mock)
+   mock = Mock( function, *args, **kwargs )( mock )
    yield mock
    mock.disable()

@@ -18,7 +18,7 @@
 #include <assert.h>
 
 extern "C" {
-extern int f( int ival, const char *sval, int * ipval );
+extern int f( int ival, const char * sval, int * ipval );
 extern void entry( int expect_return, int expect_i );
 }
 
@@ -26,8 +26,8 @@ extern void entry( int expect_return, int expect_i );
  * This is the underlying C++ implementation of our function, "f", that
  * we will mock.
  */
-int f( int ival, const char *sval, int * ipval )
-{
+int
+f( int ival, const char * sval, int * ipval ) {
    std::cout << "f(" << ival << ", " << sval << ", " << ipval << ")" << std::endl;
    *ipval = 2;
    return 1;
@@ -39,8 +39,8 @@ int f( int ival, const char *sval, int * ipval )
  * "f" to return, so we can verify if we called the mocked function or the real
  * one
  */
-void entry( int expect_return, int expect_i )
-{
+void
+entry( int expect_return, int expect_i ) {
    int i = 1;
    int rv = f( i, "hello", &i );
    std::cout << "returned " << rv << ", i is now " << i << std::endl;

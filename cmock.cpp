@@ -39,17 +39,17 @@
  * things , and calls mprotect
  */
 static void
-protect( int perms, void *p, size_t len ) {
+protect( int perms, void * p, size_t len ) {
    uintptr_t start = ( uintptr_t )p;
    uintptr_t end = start + len;
    uintptr_t start_page = start - start % getpagesize();
    uintptr_t end_page = end - end % getpagesize();
    // This should not fail. If it does, we've real problems doing this style mock.
-   int rc = mprotect( ( void * )start_page, end_page - start_page + getpagesize(),
-         perms );
+   int rc =
+      mprotect( ( void * )start_page, end_page - start_page + getpagesize(), perms );
    if ( rc != 0 ) {
       std::clog << "mprotect failed: " << rc << ": " << strerror( errno )
-          << std::endl;
+                << std::endl;
       abort();
    }
 }
@@ -68,20 +68,25 @@ protect( int perms, void *p, size_t len ) {
  */
 
 struct GOTMock {
-   PyObject_HEAD
-   std::map<ElfW( Addr ), void *> replaced;
-   void *callback;
-   const char *function;
-   GOTMock( const char *name_, void *callback_, void *handle_ );
-   void processLibrary( const char *, ElfW( Dyn ) *dynamic, ElfW( Addr ) loadaddr,
-         const char *function, void *thunk );
-   static void handleAddend( const ElfW( Rel ) &rel ) { }
-   static void handleAddend( const ElfW( Rela ) &rela ) {
+   PyObject_HEAD std::map< ElfW( Addr ), void * > replaced;
+   void * callback;
+   const char * function;
+   GOTMock( const char * name_, void * callback_, void * handle_ );
+   void processLibrary( const char *,
+                        ElfW( Dyn ) * dynamic,
+                        ElfW( Addr ) loadaddr,
+                        const char * function,
+                        void * thunk );
+   static void handleAddend( const ElfW( Rel ) & rel ) {}
+   static void handleAddend( const ElfW( Rela ) & rela ) {
       assert( rela.r_addend == 0 );
    }
-   template <typename reltype> void
-      findGotEntries( ElfW( Addr ) loadaddr, const reltype *relocs, size_t reloclen,
-            const ElfW( Sym ) *symbols, const char *strings);
+   template< typename reltype >
+   void findGotEntries( ElfW( Addr ) loadaddr,
+                        const reltype * relocs,
+                        size_t reloclen,
+                        const ElfW( Sym ) * symbols,
+                        const char * strings );
    void enable();
    void disable();
 };
@@ -95,14 +100,14 @@ struct GOTMock {
  */
 struct StompMock {
    PyObject_HEAD
-   // the i386 assembler to stomp over the function's prelude to enable the mock.
-   char enable[ 5 ];
+      // the i386 assembler to stomp over the function's prelude to enable the mock.
+      char enable[ 5 ];
 
    // the original code that was contained in the 5 bytes above.
    char disable[ 5 ];
 
-   void *location; // the location in memory where we should do our stomping.
-   StompMock( const char *name, void *callback, long handle );
+   void * location; // the location in memory where we should do our stomping.
+   StompMock( const char * name, void * callback, long handle );
    void setState( bool );
 };
 
@@ -110,16 +115,14 @@ struct StompMock {
  * Construct a mock for function called name_, to call function callback_
  * if invoked from library handle (or any library, if handle == 0)
  */
-GOTMock::GOTMock( const char *name_, void *callback_, void *handle )
-   : callback( callback_ )
-   , function( name_ )
-{
+GOTMock::GOTMock( const char * name_, void * callback_, void * handle )
+      : callback( callback_ ), function( name_ ) {
    if ( handle == 0 ) {
       // Override function in all libraries.
       for ( auto map = _r_debug.r_map; map; map = map->l_next )
          processLibrary( map->l_name, map->l_ld, map->l_addr, function, callback );
    } else {
-      auto map = static_cast<link_map *>( handle );
+      auto map = static_cast< link_map * >( handle );
       processLibrary( map->l_name, map->l_ld, map->l_addr, function, callback );
    }
    enable();
@@ -130,23 +133,24 @@ GOTMock::GOTMock( const char *name_, void *callback_, void *handle )
  * for ELF Rela and Rel locations. handleAddend is overloaded for each, and can
  * handle the addend parts for rela, if we ever care about them
  */
-template <typename reltype> void
+template< typename reltype >
+void
 GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
-        const reltype *relocs,
-        size_t reloclen,
-        const ElfW( Sym ) *symbols,
-        const char *strings) {
+                         const reltype * relocs,
+                         size_t reloclen,
+                         const ElfW( Sym ) * symbols,
+                         const char * strings ) {
    for ( int i = 0;; ++i ) {
       if ( ( char * )( relocs + i ) >= ( char * )relocs + reloclen )
          break;
-      auto &reloc = relocs[ i ];
+      auto & reloc = relocs[ i ];
       auto symidx = ELF_R_SYM( reloc.r_info );
-      auto &sym = symbols[ symidx ];
-      const char *name = strings + sym.st_name;
+      auto & sym = symbols[ symidx ];
+      const char * name = strings + sym.st_name;
       // If we find the funciton we want, update the GOT entry with ptr to our code.
       if ( strcmp( name, function ) == 0 ) {
          ElfW( Addr ) loc = reloc.r_offset + loadaddr;
-         void **addr = reinterpret_cast<void **>( loc );
+         void ** addr = reinterpret_cast< void ** >( loc );
          handleAddend( reloc );
          replaced[ loc ] = *addr;
       }
@@ -158,9 +162,9 @@ GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
  */
 void
 GOTMock::enable() {
-   for ( auto &addr : replaced ) {
+   for ( auto & addr : replaced ) {
       auto p = ( void ** )addr.first;
-      protect(PROT_READ|PROT_WRITE, p, sizeof callback);
+      protect( PROT_READ | PROT_WRITE, p, sizeof callback );
       *p = callback;
    }
 }
@@ -171,55 +175,57 @@ GOTMock::enable() {
  */
 void
 GOTMock::disable() {
-    for ( auto &addr : replaced )
-        *( void ** )addr.first = addr.second;
+   for ( auto & addr : replaced )
+      *( void ** )addr.first = addr.second;
 }
 
 /*
  * Process a single library's relocation information
  */
 void
-GOTMock::processLibrary( const char *libname, ElfW( Dyn ) *dynamic,
-      ElfW( Addr ) loadaddr, const char *function, void *thunk ) {
-
+GOTMock::processLibrary( const char * libname,
+                         ElfW( Dyn ) * dynamic,
+                         ElfW( Addr ) loadaddr,
+                         const char * function,
+                         void * thunk ) {
    int reltype = -1;
-   ElfW( Rel ) *relocs = 0;
-   ElfW( Rela ) *relocas = 0;
+   ElfW( Rel ) * relocs = 0;
+   ElfW( Rela ) * relocas = 0;
    ElfW( Word ) reloclen = -1;
-   ElfW( Sym ) *symbols = 0;
-   const char *strings = 0;
+   ElfW( Sym ) * symbols = 0;
+   const char * strings = 0;
 
    for ( auto i = 0; dynamic[ i ].d_tag != DT_NULL; ++i ) {
-      auto &dyn = dynamic[ i ];
+      auto & dyn = dynamic[ i ];
       switch ( dyn.d_tag ) {
-         case DT_PLTREL:
-            reltype = dyn.d_un.d_val;
-            break;
-         case DT_JMPREL:
-            relocas = ( ElfW( Rela ) * )( dyn.d_un.d_ptr );
-            relocs = ( ElfW( Rel ) * )( dyn.d_un.d_ptr );
-            break;
-         case DT_PLTRELSZ:
-            reloclen = dyn.d_un.d_val;
-            break;
-         case DT_STRTAB:
-            strings = ( char * )( dyn.d_un.d_ptr );
-            break;
-         case DT_SYMTAB:
-            symbols = ( ElfW( Sym ) * )( dyn.d_un.d_ptr );
-            break;
+       case DT_PLTREL:
+         reltype = dyn.d_un.d_val;
+         break;
+       case DT_JMPREL:
+         relocas = ( ElfW( Rela ) * )( dyn.d_un.d_ptr );
+         relocs = ( ElfW( Rel ) * )( dyn.d_un.d_ptr );
+         break;
+       case DT_PLTRELSZ:
+         reloclen = dyn.d_un.d_val;
+         break;
+       case DT_STRTAB:
+         strings = ( char * )( dyn.d_un.d_ptr );
+         break;
+       case DT_SYMTAB:
+         symbols = ( ElfW( Sym ) * )( dyn.d_un.d_ptr );
+         break;
       }
    }
 
    switch ( reltype ) {
-      case DT_REL:
-         findGotEntries( loadaddr, relocs, reloclen, symbols, strings );
-         break;
-      case DT_RELA:
-         findGotEntries( loadaddr, relocas, reloclen, symbols, strings );
-         break;
-      default:
-         break;
+    case DT_REL:
+      findGotEntries( loadaddr, relocs, reloclen, symbols, strings );
+      break;
+    case DT_RELA:
+      findGotEntries( loadaddr, relocas, reloclen, symbols, strings );
+      break;
+    default:
+      break;
    }
 }
 
@@ -228,14 +234,14 @@ GOTMock::processLibrary( const char *libname, ElfW( Dyn ) *dynamic,
  * "handle" here specifies the library containing the function we want to
  * mock out.
  */
-StompMock::StompMock( const char *name, void *callback, long handle ) {
-   void *lib = handle ? ( void * )( intptr_t )handle : RTLD_DEFAULT;
+StompMock::StompMock( const char * name, void * callback, long handle ) {
+   void * lib = handle ? ( void * )( intptr_t )handle : RTLD_DEFAULT;
 
    /* find the symbol for this function. */
    location = dlsym( lib, name );
    if ( !location ) {
-      std::cerr << "no symbol found for " << name <<  ", handle " << handle
-         << ": " << dlerror() << std::endl;
+      std::cerr << "no symbol found for " << name << ", handle " << handle << ": "
+                << dlerror() << std::endl;
       throw std::exception();
    }
 
@@ -243,7 +249,7 @@ StompMock::StompMock( const char *name, void *callback, long handle ) {
     * save the first 5 bytes of the function, and generate code for a jmp
     * instruction to the callback.
     */
-   unsigned char *insns = ( unsigned char * )location;
+   unsigned char * insns = ( unsigned char * )location;
    memcpy( disable, insns, 5 );
    enable[ 0 ] = 0xe9;
 
@@ -257,9 +263,9 @@ StompMock::StompMock( const char *name, void *callback, long handle ) {
 
 void
 StompMock::setState( bool state ) {
-   protect( PROT_READ|PROT_WRITE, location, sizeof enable );
+   protect( PROT_READ | PROT_WRITE, location, sizeof enable );
    memcpy( location, state ? enable : disable, sizeof enable );
-   protect( PROT_READ|PROT_EXEC, location, sizeof enable );
+   protect( PROT_READ | PROT_EXEC, location, sizeof enable );
 }
 
 /*
@@ -267,70 +273,69 @@ StompMock::setState( bool state ) {
  */
 
 static PyObject *
-gotNew( PyTypeObject *subtype, PyObject *args, PyObject *kwds ) {
-   auto obj = reinterpret_cast<GOTMock *>( subtype->tp_alloc( subtype, 0 ) );
-   const char *name;
+gotNew( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
+   auto obj = reinterpret_cast< GOTMock * >( subtype->tp_alloc( subtype, 0 ) );
+   const char * name;
    long long callback;
    long long handle;
 
-   if (!PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ))
+   if ( !PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ) )
       return nullptr;
    new ( obj ) GOTMock( name, ( void * )callback, ( void * )handle );
-   return reinterpret_cast<PyObject *>( obj );
+   return reinterpret_cast< PyObject * >( obj );
 }
 
 static PyObject *
-gotEnable( PyObject *self, PyObject *args ) {
-   auto *mock = reinterpret_cast<GOTMock *>( self );
+gotEnable( PyObject * self, PyObject * args ) {
+   auto * mock = reinterpret_cast< GOTMock * >( self );
    mock->enable();
    Py_RETURN_NONE;
 }
 
 static PyObject *
-gotDisable( PyObject *self, PyObject *args )
-{
-   auto *mock = reinterpret_cast<GOTMock *>( self );
+gotDisable( PyObject * self, PyObject * args ) {
+   auto * mock = reinterpret_cast< GOTMock * >( self );
    mock->disable();
    Py_RETURN_NONE;
 }
 
 static void
-gotFree( PyObject *self ) {
-   delete reinterpret_cast<GOTMock *>( self );
+gotFree( PyObject * self ) {
+   delete reinterpret_cast< GOTMock * >( self );
 }
 
 static PyObject *
-stompNew( PyTypeObject *subtype, PyObject *args, PyObject *kwds ) {
-   auto obj = reinterpret_cast<StompMock *>( subtype->tp_alloc( subtype, 0 ) );
+stompNew( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
+   auto obj = reinterpret_cast< StompMock * >( subtype->tp_alloc( subtype, 0 ) );
 
-   const char *name;
+   const char * name;
    long long callback;
    long long handle;
 
-   if (!PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ))
+   if ( !PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ) )
       return nullptr;
-   new ( obj ) StompMock( name, (void *)callback, handle );
-   return reinterpret_cast<PyObject *>( obj );
+   new ( obj ) StompMock( name, ( void * )callback, handle );
+   return reinterpret_cast< PyObject * >( obj );
 }
 
 static PyObject *
-stompEnable( PyObject *self, PyObject *args ) {
-   auto *mock = reinterpret_cast<StompMock *>( self );
+stompEnable( PyObject * self, PyObject * args ) {
+   auto * mock = reinterpret_cast< StompMock * >( self );
    mock->setState( true );
    Py_RETURN_NONE;
 }
 
 static PyObject *
-stompDisable( PyObject *self, PyObject *args ) {
-   auto *mock = reinterpret_cast<StompMock *>( self );
+stompDisable( PyObject * self, PyObject * args ) {
+   auto * mock = reinterpret_cast< StompMock * >( self );
    mock->setState( false );
    Py_RETURN_NONE;
    abort();
 }
 
 static void
-stompFree( PyObject *self ) {
-   delete reinterpret_cast<StompMock *>( self );
+stompFree( PyObject * self ) {
+   delete reinterpret_cast< StompMock * >( self );
 }
 
 /*
@@ -407,7 +412,6 @@ initlibCTypeMock( void )
 #if PY_MAJOR_VERSION >= 3
    return module;
 #endif
-
 }
 
 /*
@@ -416,8 +420,7 @@ initlibCTypeMock( void )
  */
 extern "C" {
 void *
-cfuncTypeToPtrToFunc( void *function )
-{
+cfuncTypeToPtrToFunc( void * function ) {
    return function;
 }
 }

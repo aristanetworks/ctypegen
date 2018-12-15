@@ -228,15 +228,15 @@ print_foo( const Foo * foo, char * data, size_t maxlen ) {
 }
 
 namespace Outer {
-    namespace Inner {
-        struct Leaf {
-            int inNamespace;
-        };
-    }
-}
+namespace Inner {
+struct Leaf {
+   int inNamespace;
+};
+} // namespace Inner
+} // namespace Outer
 
 struct Leaf {
-    int atGlobalScope;
+   int atGlobalScope;
 };
 
 typedef struct NameSharedWithStructAndTypedef {
