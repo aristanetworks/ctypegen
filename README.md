@@ -3,6 +3,9 @@ CTypeGen generates the python "ctypes" boilerplate code to allow you call
 C functions from python's ctypes, and inspect and construct C structure
 types from python.
 
+It also includes a mocking framework that allows you to mock out functions called
+by your C code and intercept them with python code instead.
+
 ## Building
 This package depends on the `pstack` project [here](http://github.com/peadar/pstack)
 
@@ -80,3 +83,30 @@ functions = [ "f" ]
 CTypeGen.generate(["libname"], "libname.py", types, functions)
 ```
 And you'll magically have libname.py with the boilerplate generated for you.
+
+## Mocking
+
+There is an example of how to use this in test/MockTest.py. Basic usage is given
+a shared library "lib" with function "f":
+
+``` 
+int f( int ival, const char * sval, int * ipval );
+```
+
+(that you will have decorated with ctypegen above), you can do this:
+
+```
+@CMock.Mock( lib.f, lib, method=CMock.GOT )
+def mockedF( i, s, iptr ):
+   print( "mocked function! got args: i(%s)=%d, s(%s)=%s, iptr(%s)=%s" %
+          ( type( i ), i, type( s ), s, type( iptr ), iptr[ 0 ] ) )
+   iptr[ 0 ] = 101
+   return 100
+```
+
+Any function in your DLL that calls "f", will now call the python function
+mockedF instead.
+
+## Links
+There are some slides from a presentation on this package
+[here](https://aristanetworks.github.io/ctypegen)
