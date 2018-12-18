@@ -18,7 +18,7 @@ and install this package. For example
 $ git clone http://github.com/peadar/pstack
 $ git clone http://github.com/aristanetworks/ctypegen
 $ cd pstack
-$ cmake -DCMAKE_BUILD_TYPE=Release LIBTYPE=SHARED .
+$ cmake -DCMAKE_BUILD_TYPE=Release -DLIBTYPE=SHARED .
 $ make
 $ sudo make install
 $ cd ../CTypeGen
