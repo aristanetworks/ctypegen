@@ -109,7 +109,7 @@ class Type( object ):
    def definition( self ):
       if self.defdie:
          return self.defdie
-      if not self.die[ attrs.DW_AT_declaration ]:
+      if not self.die.DW_AT_declaration:
          self.defdie = self.die
          return self.defdie
       for d in self.resolver.dwarves:
@@ -146,14 +146,14 @@ class Type( object ):
       arrays are pointers to and arrays of their base type. Typedefs
       and consts modify their base types'''
 
-      baseDie = self.definition()[ attrs.DW_AT_type ]
+      baseDie = self.definition().DW_AT_type
       if baseDie:
          return self.resolver.dieToType( baseDie )
       return None
 
    def size( self ):
       ''' The size of the type, as reported via DWARF '''
-      return self.definition()[ attrs.DW_AT_byte_size ]
+      return self.definition().DW_AT_byte_size
 
    def hasName( self ):
       return self._name is not None
@@ -207,7 +207,7 @@ class FunctionType( Type ):
          self.resolver.defineType( rtype, out )
       for child in self.params():
          self.resolver.defineType(
-               self.resolver.dieToType( child[ attrs.DW_AT_type ] ), out )
+               self.resolver.dieToType( child.DW_AT_type ), out )
 
    def size( self ):
       raise Exception( "functions don't have sizes : %s" % self.name() )
@@ -223,7 +223,7 @@ class FunctionType( Type ):
 
       for child in self.params():
          result.write( u", %s\n      " %
-               self.resolver.dieToType( child[ attrs.DW_AT_type ] ).ctype() )
+               self.resolver.dieToType( child.DW_AT_type ).ctype() )
       result.write( u")" )
       return result.getvalue()
 
@@ -240,7 +240,7 @@ class FunctionDefType( FunctionType ):
                ( pad( indent ), self.name(), base.ctype() ) )
       args = []
       for child in self.params():
-         baseType = self.resolver.dieToType( child[ attrs.DW_AT_type ] )
+         baseType = self.resolver.dieToType( child.DW_AT_type )
          args.append( baseType.ctype() )
       stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), self.name() ) )
       if args:
@@ -267,7 +267,7 @@ class Member( object ):
    def name( self ):
       if self._name:
          return self._name
-      return self.die[ attrs.DW_AT_name ]
+      return self.die.DW_AT_name
 
    def pyName( self ):
       return asPythonId( self.name() )
@@ -288,14 +288,14 @@ class Member( object ):
    def bit_size( self ):
       if self.ctypeOverride != None:
          return None
-      return self.die[ attrs.DW_AT_bit_size ]
+      return self.die.DW_AT_bit_size
 
    def isStatic( self ):
       return self.die.tag() == tags.DW_TAG_member and \
-            self.die[ attrs.DW_AT_member_location ] is None
+            self.die.DW_AT_member_location is None
 
    def type( self ):
-      return self.resolver.dieToType( self.die[ attrs.DW_AT_type ] )
+      return self.resolver.dieToType( self.die.DW_AT_type )
 
    def setCType( self, ctype ):
       self.ctypeOverride = ctype
@@ -319,7 +319,7 @@ class MemberType( Type ):
       superCount = 0
       for field in self.definition():
          tag = field.tag()
-         if field[ attrs.DW_AT_external ]:
+         if field.DW_AT_external:
             continue
          if tag == tags.DW_TAG_inheritance:
             member = Member( field, self.resolver )
@@ -373,7 +373,7 @@ class MemberType( Type ):
                typedesc.cName = member.type().name()
                typedesc.type = member.type()
 
-               memberTypeDIE = member.die[ attrs.DW_AT_type ]
+               memberTypeDIE = member.die.DW_AT_type
                typ = self.resolver.dieToType( memberTypeDIE )
                typ.applyHints( typedesc )
                # add to names we'll define later
@@ -466,7 +466,7 @@ class StructType( MemberType ):
       memberCount = 0
       lastOffset = -1
       for member in self.members:
-         memberOffset = member.die[ attrs.DW_AT_data_member_location ]
+         memberOffset = member.die.DW_AT_data_member_location
          # All members of a bitfield have the same member offset, and report
          # their size as the byte size of the whole object.
          # If we've overridden the type on a member, we assume the user
@@ -507,14 +507,14 @@ class EnumType( Type ):
          if self.dieComment():
             out.write( u"%s%s\n" % ( indent, self.dieComment() ) )
          if child.tag() == tags.DW_TAG_enumerator:
-            value = child[ attrs.DW_AT_const_value ]
-            name = asPythonId( child[ attrs.DW_AT_name ] )
+            value = child.DW_AT_const_value
+            name = asPythonId( child.DW_AT_name )
             out.write( u"%s%s = %s(%d).value # 0x%x\n" % (
                indent, name, self.intType(), value, value ) )
       out.write( u"\n\n" )
 
    def intType( self ):
-      size = self.definition()[ attrs.DW_AT_byte_size ]
+      size = self.definition().DW_AT_byte_size
       if size == 4:
          return u"c_uint32"
       if size == 8:
@@ -553,7 +553,7 @@ class PrimitiveType( Type ):
       return self.ctype()
 
    def ctype( self ):
-      name = self.die[ attrs.DW_AT_name ]
+      name = self.die.DW_AT_name
       if not name in PrimitiveType.baseTypes:
          raise Exception( "no python ctype for primitive C type %s" % name )
       return PrimitiveType.baseTypes[ name ]
@@ -567,7 +567,7 @@ class ArrayType( Type ):
       self.dimensions = []
       for child in reversed( [ c for c in self.definition() ] ):
          if child.tag() == tags.DW_TAG_subrange_type:
-            upper = child[ attrs.DW_AT_upper_bound ]
+            upper = child.DW_AT_upper_bound
             if upper is None:
                self.dimensions.append( 0 )
             else:
@@ -598,7 +598,7 @@ class PointerType( Type ):
       self.resolver.declareType( self.baseType(), out )
 
    def ctype( self ):
-      baseDie = self.definition()[ attrs.DW_AT_type ]
+      baseDie = self.definition().DW_AT_type
       if not baseDie:
          return u"c_void_p"
       baseCtype = self.baseType().ctype()
@@ -930,7 +930,7 @@ class TypeResolver( object ):
             namespace.decUnresolved()
          return None
 
-      if die[ attrs.DW_AT_declaration ]:
+      if die.DW_AT_declaration:
          return None
 
       if tag == tags.DW_TAG_subprogram:
@@ -988,7 +988,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
                self.errorfunc( "variable %s not found in namespace %s" %
                                ( name, ns.name() ) )
             else:
-               self.defineType( self.dieToType( die[ attrs.DW_AT_type ] ), stream )
+               self.defineType( self.dieToType( die.DW_AT_type ), stream )
 
          # define function types we wanted.
          for name, die in iteritems( ns.functions ):
@@ -1008,7 +1008,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          for name, die in iteritems( ns.variables ):
             if die is None:
                continue
-            t = self.dieToType( die[ attrs.DW_AT_type ] )
+            t = self.dieToType( die.DW_AT_type )
             stream.write( u"%sself.%s = ( %s ).in_dll( dll, '%s' )\n" %
                   ( pad( 6 ), name, t.ctype(), name ) )
 

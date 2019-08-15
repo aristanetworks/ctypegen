@@ -38,6 +38,10 @@ static PyTypeObject dwarfEntryIteratorType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyTypeObject dwarfTagsType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyTypeObject dwarfAttrsType = { PyObject_HEAD_INIT( 0 ) 0 };
 
+static PyObject * attrnames; // attribute name -> value mapping
+static PyObject * attrvalues; // attribute value -> name mapping
+static PyObject * tagnames;
+
 // These are the DWARF tags for DIEs that introduce a new namespace in C/C++
 static std::set< Dwarf::Tag > namespacetags = {
    Dwarf::DW_TAG_structure_type,
@@ -210,6 +214,36 @@ attr_init( PyObject * object, PyObject * args, PyObject * kwds ) {
 #include <libpstack/dwarf/attr.h>
 #undef DWARF_ATTR
    return 0;
+};
+
+static PyObject *
+make_attrnames() {
+   auto namedict = PyDict_New();
+#define DWARF_ATTR( name, value )                                                   \
+   PyDict_SetItem( namedict, PyLong_FromLong( value ), makeString( #name ) );
+#include <libpstack/dwarf/attr.h>
+#undef DWARF_ATTR
+   return namedict;
+};
+
+static PyObject *
+make_attrvalues() {
+   auto valuedict = PyDict_New();
+#define DWARF_ATTR( name, value )                                                   \
+   PyDict_SetItem( valuedict, makeString( #name ), PyLong_FromLong( value ) );
+#include <libpstack/dwarf/attr.h>
+#undef DWARF_ATTR
+   return valuedict;
+};
+
+static PyObject *
+make_tagnames() {
+   auto namedict = PyDict_New();
+#define DWARF_TAG( name, value )                                                    \
+   PyDict_SetItem( namedict, PyLong_FromLong( value ), makeString( #name ) );
+#include <libpstack/dwarf/tags.h>
+#undef DWARF_TAG
+   return namedict;
 };
 
 static int
@@ -422,21 +456,9 @@ entry_file( PyObject * self, PyObject * args ) {
    return makeString( txt );
 }
 
-/*
- * Get an attribute in the DIE
- * To make it easy to use for python, we convert the integer index to a DWARF
- * attribute name. (The "attrs" object in the module contains the numeric values for
- * the named DWARF attrs.)
- *
- * We use this for both the indexing operation on the DIe, and explicitly with the
- * getattr method
- */
 static PyObject *
-entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
+pyAttr( const Dwarf::Attribute & attr ) {
    try {
-      const auto pyEntry = ( PyDwarfEntry * )self;
-      const Dwarf::Attribute & attr =
-         pyEntry->die.attribute( Dwarf::AttrName( idx ) );
       if ( !attr.valid() )
          Py_RETURN_NONE;
       switch ( attr.form() ) {
@@ -472,8 +494,7 @@ entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
             Py_RETURN_FALSE;
          }
        default:
-         std::clog << "no handler for form " << attr.form() << "in attribute " << idx
-                   << "\n";
+         std::clog << "no handler for form " << attr.form() << "\n";
          break;
       }
       Py_RETURN_NONE;
@@ -481,6 +502,61 @@ entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
       return nullptr;
    }
+}
+
+/*
+ * Get an attribute in the DIE
+ * To make it easy to use for python, we convert the integer index to a DWARF
+ * attribute name. (The "attrs" object in the module contains the numeric values for
+ * the named DWARF attrs.)
+ *
+ * We use this for both the indexing operation on the DIe, and explicitly with the
+ * getattr method
+ */
+static PyObject *
+entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
+   const auto pyEntry = ( PyDwarfEntry * )self;
+   const Dwarf::Attribute & attr = pyEntry->die.attribute( Dwarf::AttrName( idx ) );
+   return pyAttr( attr );
+}
+
+/*
+ * Get all the attributes from a DIE as a dict, keyed by the attribute's numerical ID
+ */
+static PyObject *
+entry_get_attrs( PyObject * self, PyObject * args ) {
+   auto namedict = PyDict_New();
+   const auto & die = reinterpret_cast< PyDwarfEntry * >( self )->die;
+   for ( const auto & attr : die.attributes() ) {
+      PyDict_SetItem(
+         namedict, PyLong_FromLong( attr.first ), pyAttr( attr.second ) );
+   }
+   return namedict;
+}
+
+/*
+ * Get all attributes from a DIE as a dict, keyed by the attribute's string name
+ */
+static PyObject *
+entry_get_attrs_by_name( PyObject * self, PyObject * args ) {
+   auto namedict = PyDict_New();
+   const auto & die = reinterpret_cast< PyDwarfEntry * >( self )->die;
+   for ( const auto & attr : die.attributes() ) {
+      PyObject * attrname =
+         PyDict_GetItem( attrnames, PyLong_FromLong( attr.first ) );
+      PyDict_SetItem( namedict, attrname, pyAttr( attr.second ) );
+   }
+   return namedict;
+}
+
+static PyObject *
+entry_getattr( PyObject * self, PyObject * key ) {
+   PyObject * value = PyDict_GetItem( attrvalues, key );
+   if ( value == nullptr ) {
+      // It's not a known DWARF attribute - delegate.
+      return PyObject_GenericGetAttr( self, key );
+   }
+   return entry_getattr_idx( self, PyLong_AsLong( value ) );
 }
 
 static void
@@ -554,6 +630,14 @@ static PyMethodDef entry_methods[] = {
    { "offset", entry_offset, METH_VARARGS, "offset of a DIE in DWARF image" },
    { "file", entry_file, METH_VARARGS, "file containing DIE" },
    { "name", entry_name, METH_VARARGS, "get namespace-local name of a DIE" },
+   { "attrs",
+     entry_get_attrs,
+     METH_VARARGS,
+     "get all attributes from a DIE (as a dict)" },
+   { "namedattrs",
+     entry_get_attrs_by_name,
+     METH_VARARGS,
+     "get all attributes from a DIE (as a dict)" },
    { "fullname",
      entry_fullname,
      METH_VARARGS,
@@ -620,6 +704,11 @@ initlibCTypeGen( void )
       attrs->ob_type->tp_init( attrs, nullptr, nullptr );
       PyModule_AddObject( module, "attrs", ( PyObject * )attrs );
    }
+   attrnames = make_attrnames();
+   attrvalues = make_attrvalues();
+   tagnames = make_tagnames();
+   PyModule_AddObject( module, "attrnames", attrnames );
+   PyModule_AddObject( module, "tagnames", tagnames );
 
    elfObjectType.tp_name = "libCTypeGen.ElfObject";
    elfObjectType.tp_flags = Py_TPFLAGS_DEFAULT;
@@ -635,6 +724,7 @@ initlibCTypeGen( void )
    dwarfEntryType.tp_doc = "DWARF DIE object";
    dwarfEntryType.tp_dealloc = entry_free;
    dwarfEntryType.tp_new = PyType_GenericNew;
+   dwarfEntryType.tp_getattro = entry_getattr;
    dwarfEntryType.tp_methods = entry_methods;
    dwarfEntryType.tp_iter = entry_iterator;
    dwarfEntryType.tp_hash = entry_hash;
