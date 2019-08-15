@@ -22,7 +22,7 @@ import CMock
 if len( sys.argv ) >= 2:
    mocklib = sys.argv[ 1 ]
 else:
-   mocklib = ".libs/libMockTest.so"
+   mocklib = "libMockTest.so"
 
 # Generate type info for "f", and "entry" so we can call them.
 module, resolver = generate( mocklib, "proggen.py", [], [ "f", "entry" ] )

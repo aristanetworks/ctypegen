@@ -75,8 +75,7 @@ struct GOTMock {
    void processLibrary( const char *,
                         ElfW( Dyn ) * dynamic,
                         ElfW( Addr ) loadaddr,
-                        const char * function,
-                        void * thunk );
+                        const char * function );
    static void handleAddend( const ElfW( Rel ) & rel ) {}
    static void handleAddend( const ElfW( Rela ) & rela ) {
       assert( rela.r_addend == 0 );
@@ -91,6 +90,17 @@ struct GOTMock {
    void disable();
 };
 
+extern char cmock_thunk_function[];
+extern char cmock_thunk_end[];
+
+struct PreMock : public GOTMock {
+   void enable();
+   void * callbackFor( void *got, void *func );
+   std::map< void *, void * > thunks;
+   PreMock( const char * name_, void * callback_, void * handle_ )
+         : GOTMock( name_, callback_, handle_ ) {}
+};
+
 /*
  * Our function-code-stomping version. This _only_ works on i386
  * It is useful for when shared libraries are not compiled as PIC.
@@ -101,14 +111,16 @@ struct GOTMock {
 struct StompMock {
    PyObject_HEAD
       // the i386 assembler to stomp over the function's prelude to enable the mock.
-      char enable[ 5 ];
+      char enableCode[ 5 ];
 
    // the original code that was contained in the 5 bytes above.
-   char disable[ 5 ];
+   char disableCode[ 5 ];
 
    void * location; // the location in memory where we should do our stomping.
-   StompMock( const char * name, void * callback, long handle );
+   StompMock( const char * name, void * callback, void * handle );
    void setState( bool );
+   void enable() { setState( true ); }
+   void disable() { setState( false ); }
 };
 
 /*
@@ -120,12 +132,11 @@ GOTMock::GOTMock( const char * name_, void * callback_, void * handle )
    if ( handle == 0 ) {
       // Override function in all libraries.
       for ( auto map = _r_debug.r_map; map; map = map->l_next )
-         processLibrary( map->l_name, map->l_ld, map->l_addr, function, callback );
+         processLibrary( map->l_name, map->l_ld, map->l_addr, function );
    } else {
       auto map = static_cast< link_map * >( handle );
-      processLibrary( map->l_name, map->l_ld, map->l_addr, function, callback );
+      processLibrary( map->l_name, map->l_ld, map->l_addr, function );
    }
-   enable();
 }
 
 /*
@@ -157,6 +168,47 @@ GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
    }
 }
 
+void *
+PreMock::callbackFor( void *got, void * func ) {
+   auto & thunk = thunks[ got ];
+   if ( thunk == nullptr ) {
+      int rc = posix_memalign( &thunk, 4096, 8192 );
+      assert( rc == 0 );
+      void ** bufp = ( void ** )thunk;
+      memcpy( thunk, cmock_thunk_function, cmock_thunk_end - cmock_thunk_function );
+
+#ifdef __LP64__
+      bufp[ 1020 ] = &bufp[ 1019 ];
+      bufp[ 1021 ] = got;
+      bufp[ 1022 ] = callback;
+      bufp[ 1023 ] = ( void * )func;
+#else
+      // the end of the second page contains the addresses of our two functions
+      // (indexes 2047 and 2046), the stack pointer (index 2045), and the rest
+      // is the stack itself (1024 to 2044). If we overflow the stack, we'll
+      // try and write to the read-only executable page, and fault quickly.
+      bufp[ 2044 ] = &bufp[ 2043 ];
+      bufp[ 2045 ] = got;
+      bufp[ 2046 ] = callback;
+      bufp[ 2047 ] = ( void * )func;
+#endif
+      mprotect( bufp, 4096, PROT_READ | PROT_EXEC );
+   }
+   return thunk;
+}
+
+/*
+ * Go over all the offsets in the GOT that refer to us, and patch in our mock.
+ */
+void
+PreMock::enable() {
+   for ( auto & addr : replaced ) {
+      auto p = ( void ** )addr.first;
+      protect( PROT_READ | PROT_WRITE, p, sizeof callback );
+      *p = callbackFor( (void *)addr.first, ( void * )addr.second );
+   }
+}
+
 /*
  * Go over all the offsets in the GOT that refer to us, and patch in our mock.
  */
@@ -180,14 +232,15 @@ GOTMock::disable() {
 }
 
 /*
- * Process a single library's relocation information
+ * Process a single library's relocation information:
+ * Find the DT_REL or DT_RELA relocations, then find
+ * relocations for the named function in there.
  */
 void
 GOTMock::processLibrary( const char * libname,
                          ElfW( Dyn ) * dynamic,
                          ElfW( Addr ) loadaddr,
-                         const char * function,
-                         void * thunk ) {
+                         const char * function ) {
    int reltype = -1;
    ElfW( Rel ) * relocs = 0;
    ElfW( Rela ) * relocas = 0;
@@ -234,8 +287,8 @@ GOTMock::processLibrary( const char * libname,
  * "handle" here specifies the library containing the function we want to
  * mock out.
  */
-StompMock::StompMock( const char * name, void * callback, long handle ) {
-   void * lib = handle ? ( void * )( intptr_t )handle : RTLD_DEFAULT;
+StompMock::StompMock( const char * name, void * callback, void * handle ) {
+   void * lib = handle ? handle : RTLD_DEFAULT;
 
    /* find the symbol for this function. */
    location = dlsym( lib, name );
@@ -250,114 +303,93 @@ StompMock::StompMock( const char * name, void * callback, long handle ) {
     * instruction to the callback.
     */
    unsigned char * insns = ( unsigned char * )location;
-   memcpy( disable, insns, 5 );
-   enable[ 0 ] = 0xe9;
+   memcpy( disableCode, insns, 5 );
+   enableCode[ 0 ] = 0xe9;
 
    // Calculate relative offset of jmp instruction, and insert that into our insn.
    uintptr_t jmploc = ( unsigned char * )callback - ( insns + 5 );
-   memcpy( enable + 1, &jmploc, sizeof jmploc );
-
-   /* Enable mocking */
-   setState( true );
+   memcpy( enableCode + 1, &jmploc, sizeof jmploc );
 }
 
 void
 StompMock::setState( bool state ) {
-   protect( PROT_READ | PROT_WRITE, location, sizeof enable );
-   memcpy( location, state ? enable : disable, sizeof enable );
-   protect( PROT_READ | PROT_EXEC, location, sizeof enable );
+   protect( PROT_READ | PROT_WRITE, location, sizeof enableCode );
+   memcpy( location, state ? enableCode : disableCode, sizeof enableCode );
+   protect( PROT_READ | PROT_EXEC, location, sizeof enableCode );
 }
 
 /*
- * Python entrypoints and methods
+ * Python glue for each mock type.
  */
-
+template< typename MockType >
 static PyObject *
-gotNew( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
-   auto obj = reinterpret_cast< GOTMock * >( subtype->tp_alloc( subtype, 0 ) );
+newMock( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
+   auto obj = reinterpret_cast< MockType * >( subtype->tp_alloc( subtype, 0 ) );
+
    const char * name;
    long long callback;
    long long handle;
 
    if ( !PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ) )
       return nullptr;
-   new ( obj ) GOTMock( name, ( void * )callback, ( void * )handle );
+   new ( obj ) MockType( name, ( void * )callback, ( void * )handle );
+   obj->enable();
    return reinterpret_cast< PyObject * >( obj );
 }
 
+template< typename T >
 static PyObject *
-gotEnable( PyObject * self, PyObject * args ) {
-   auto * mock = reinterpret_cast< GOTMock * >( self );
+enableMock( PyObject * self, PyObject * args ) {
+   auto * mock = reinterpret_cast< T * >( self );
    mock->enable();
    Py_RETURN_NONE;
 }
 
+template< typename T >
 static PyObject *
-gotDisable( PyObject * self, PyObject * args ) {
-   auto * mock = reinterpret_cast< GOTMock * >( self );
+disableMock( PyObject * self, PyObject * args ) {
+   auto * mock = reinterpret_cast< T * >( self );
    mock->disable();
    Py_RETURN_NONE;
 }
 
+template< typename T >
 static void
-gotFree( PyObject * self ) {
-   delete reinterpret_cast< GOTMock * >( self );
+freeMock( PyObject * self ) {
+   std::clog << "************ freeing mock!\n";
+   delete reinterpret_cast< T * >( self );
 }
-
-static PyObject *
-stompNew( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
-   auto obj = reinterpret_cast< StompMock * >( subtype->tp_alloc( subtype, 0 ) );
-
-   const char * name;
-   long long callback;
-   long long handle;
-
-   if ( !PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ) )
-      return nullptr;
-   new ( obj ) StompMock( name, ( void * )callback, handle );
-   return reinterpret_cast< PyObject * >( obj );
-}
-
-static PyObject *
-stompEnable( PyObject * self, PyObject * args ) {
-   auto * mock = reinterpret_cast< StompMock * >( self );
-   mock->setState( true );
-   Py_RETURN_NONE;
-}
-
-static PyObject *
-stompDisable( PyObject * self, PyObject * args ) {
-   auto * mock = reinterpret_cast< StompMock * >( self );
-   mock->setState( false );
-   Py_RETURN_NONE;
-   abort();
-}
-
-static void
-stompFree( PyObject * self ) {
-   delete reinterpret_cast< StompMock * >( self );
-}
-
-/*
- * Python tables for methods
- */
-static PyMethodDef stompMethods[] = {
-   { "enable", stompEnable, METH_VARARGS, "enable the mock" },
-   { "disable", stompDisable, METH_VARARGS, "disable the mock" },
-   { 0, 0, 0, 0 }
-};
-
-static PyMethodDef gotMethods[] = {
-   { "enable", gotEnable, METH_VARARGS, "enable the mock" },
-   { "disable", gotDisable, METH_VARARGS, "disable the mock" },
-   { 0, 0, 0, 0 }
-};
 
 /*
  * Types for our two mock objects.
  */
 static PyTypeObject stompObjectType;
+static PyTypeObject preObjectType;
 static PyTypeObject gotObjectType;
+
+template< typename T >
+void
+populateType( PyObject * module,
+              PyTypeObject & pto,
+              const char * name,
+              const char * doc ) {
+   static PyMethodDef methods[] = {
+      { "enable", enableMock< T >, METH_VARARGS, "enable the mock" },
+      { "disable", disableMock< T >, METH_VARARGS, "disable the mock" },
+      { 0, 0, 0, 0 }
+   };
+   pto.tp_name = name;
+   pto.tp_flags = Py_TPFLAGS_DEFAULT;
+   pto.tp_basicsize = sizeof( T );
+   pto.tp_methods = methods;
+   pto.tp_doc = doc;
+   pto.tp_new = newMock< T >;
+   pto.tp_del = freeMock< T >;
+   if ( PyType_Ready( &pto ) >= 0 ) {
+      Py_INCREF( &pto );
+      PyModule_AddObject( module, name, ( PyObject * )&pto );
+   }
+}
 
 /*
  * Initialize python library
@@ -385,30 +417,13 @@ initlibCTypeMock( void )
 #else
    PyObject * module = Py_InitModule3( "libCTypeMock", NULL, "CTypeMock C support" );
 #endif
+   populateType< StompMock >(
+      module, stompObjectType, "StompMock", "A stomping mock" );
+   populateType< GOTMock >(
+      module, gotObjectType, "GOTMock", "A GOT hijacking mock" );
+   populateType< PreMock >(
+      module, preObjectType, "PreMock", "A pre-executing GOT hijacking mock" );
 
-   stompObjectType.tp_name = "Stomp";
-   stompObjectType.tp_flags = Py_TPFLAGS_DEFAULT;
-   stompObjectType.tp_basicsize = sizeof( StompMock );
-   stompObjectType.tp_methods = stompMethods;
-   stompObjectType.tp_doc = "A stomping mock";
-   stompObjectType.tp_new = stompNew;
-   stompObjectType.tp_del = stompFree;
-   if ( PyType_Ready( &stompObjectType ) >= 0 ) {
-      Py_INCREF( &stompObjectType );
-      PyModule_AddObject( module, "StompMock", ( PyObject * )&stompObjectType );
-   }
-
-   gotObjectType.tp_name = "GOT";
-   gotObjectType.tp_flags = Py_TPFLAGS_DEFAULT;
-   gotObjectType.tp_basicsize = sizeof( GOTMock );
-   gotObjectType.tp_methods = gotMethods;
-   gotObjectType.tp_doc = "A GOT mock";
-   gotObjectType.tp_new = gotNew;
-   gotObjectType.tp_del = gotFree;
-   if ( PyType_Ready( &gotObjectType ) >= 0 ) {
-      Py_INCREF( &gotObjectType );
-      PyModule_AddObject( module, "GOTMock", ( PyObject * )&gotObjectType );
-   }
 #if PY_MAJOR_VERSION >= 3
    return module;
 #endif

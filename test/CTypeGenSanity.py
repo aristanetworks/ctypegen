@@ -22,7 +22,7 @@ from CTypeGen import generate, PythonType, generateOrThrow
 if len( sys.argv ) >= 2:
    sanitylib = sys.argv[ 1 ]
 else:
-   sanitylib = ".libs/libCTypeSanity.so"
+   sanitylib = "./libCTypeSanity.so"
 
 types = [
       PythonType( u"Foo" )

@@ -13,7 +13,7 @@
 #     limitations under the License.
 #
 PYTHON ?= python2
-.PHONY: all check clean
+.PHONY: all check clean check-pre-mock check-mock check-ctypesanity
 
 CXXFLAGS += -g -fPIC
 CFLAGS += -g -fPIC
@@ -24,10 +24,21 @@ CTypeSanity: CTypeSanityC.o CTypeSanity.o
 
 MockTest: MockTest.o
 	$(CXX) -shared -o $@ $^
+PreMockTest: PreMockTest.o
+	$(CXX) -shared -o $@ $^
 
-check: CTypeSanity MockTest
+check-bins: CTypeSanity MockTest PreMockTest
+
+check-ctypesanity: check-bins
 	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
+
+check-mock: check-bins
 	$(PYTHON) ./MockTest.py ./MockTest
 
+check-pre-mock: check-bins
+	$(PYTHON) ./PreMockTest.py ./PreMockTest
+
+check: check-mock check-pre-mock check-ctypesanity
+
 clean:
-	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py
+	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py

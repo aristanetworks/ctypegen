@@ -62,6 +62,22 @@ dieName( const Dwarf::DIE & die ) {
       return std::string( name );
    std::ostringstream os;
    os << "anon_" << die.getOffset();
+   switch ( die.tag() ) {
+    case Dwarf::DW_TAG_structure_type:
+      os << "_struct";
+      break;
+    case Dwarf::DW_TAG_class_type:
+      os << "_class";
+      break;
+    case Dwarf::DW_TAG_union_type:
+      os << "_union";
+      break;
+    case Dwarf::DW_TAG_enumeration_type:
+      os << "_enum";
+      break;
+    default:
+      break;
+   }
    return os.str();
 }
 
@@ -127,6 +143,8 @@ findDefinition( const Dwarf::DIE & die,
       if ( !sameName )
          return Dwarf::DIE();
       first++;
+      if ( end == first )
+         return Dwarf::DIE();
       // FALLTHROUGH
 
     case Dwarf::DW_TAG_compile_unit:
@@ -278,9 +296,10 @@ typedef struct {
    Dwarf::DIEIter end;
 } PyDwarfEntryIterator;
 
+static Dwarf::ImageCache imageCache;
+
 static PyObject *
 elf_open( PyObject * self, PyObject * args ) {
-   static Dwarf::ImageCache imageCache;
    try {
       const char * image;
       if ( !PyArg_ParseTuple( args, "s", &image ) )
@@ -290,13 +309,29 @@ elf_open( PyObject * self, PyObject * args ) {
       PyElfObject * val = PyObject_New( PyElfObject, &elfObjectType );
       new ( &val->obj ) std::shared_ptr< Elf::Object >( obj );
       new ( &val->dwarf ) std::shared_ptr< Dwarf::Info >( dwarf );
-      val->dwarf = imageCache.getDwarf( image );
-      val->obj = val->dwarf->elf;
       return ( PyObject * )val;
    } catch ( const std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
       return nullptr;
    }
+}
+
+static PyObject *
+elf_close( PyObject * self, PyObject * args ) {
+   try {
+      PyElfObject * pye;
+      if ( !PyArg_ParseTuple( args, "O", &pye ) ) {
+         return nullptr;
+      }
+      imageCache.flush( pye->obj );
+      // Also flush all objects we failed to load, possibly debug
+      // files not installed.
+      imageCache.flushAllFailedLoad();
+      return Py_None;
+   } catch ( const std::exception & ex ) {
+      PyErr_SetString( PyExc_RuntimeError, ex.what() );
+   }
+   return nullptr;
 }
 
 static PyObject *
@@ -613,7 +648,9 @@ entryiter_free( PyObject * o ) {
 }
 
 static PyMethodDef ctypegen_methods[] = {
-   { "open", elf_open, METH_VARARGS, "open an ELF file to process" }, { 0, 0, 0, 0 }
+   { "open", elf_open, METH_VARARGS, "open an ELF file to process" },
+   { "close", elf_close, METH_VARARGS, "close an ELF file previously opened" },
+   { 0, 0, 0, 0 }
 };
 
 static PyMethodDef elf_methods[] = {
