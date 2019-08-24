@@ -836,7 +836,7 @@ class TypeResolver( object ):
       try:
          for dwarf in self.dwarves:
             for u in dwarf.units():
-               self.enumerateDIEs( u, self.examineDIE, self.rootNamespace )
+               self.enumerateDIEs( u.root(), self.examineDIE, self.rootNamespace )
       except StopIteration:
          pass
 
