@@ -661,8 +661,10 @@ entry_getattr( PyObject * self, PyObject * key ) {
 }
 
 static void
-entry_free( PyObject * o ) {
-   dwarfEntryType.tp_free( o );
+entry_free( PyObject * self ) {
+   auto entry = reinterpret_cast< PyDwarfEntry * >( self );
+   entry->die.DIE::~DIE();
+   dwarfEntryType.tp_free( self );
 }
 
 /*
