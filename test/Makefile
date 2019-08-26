@@ -24,10 +24,10 @@ CTypeSanity: CTypeSanityC.o CTypeSanity.o
 
 MockTest: MockTest.o
 	$(CXX) -shared -o $@ $^
-PreMockTest: PreMockTest.o
+libPreMockTest.so: PreMockTest.o
 	$(CXX) -shared -o $@ $^
 
-check-bins: CTypeSanity MockTest PreMockTest
+check-bins: CTypeSanity MockTest libPreMockTest.so
 
 check-ctypesanity: check-bins
 	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
@@ -36,7 +36,7 @@ check-mock: check-bins
 	$(PYTHON) ./MockTest.py ./MockTest
 
 check-pre-mock: check-bins
-	$(PYTHON) ./PreMockTest.py ./PreMockTest
+	$(PYTHON) ./PreMockTest.py ./libPreMockTest.so
 
 check: check-mock check-pre-mock check-ctypesanity
 
