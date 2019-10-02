@@ -93,7 +93,7 @@ static void
 getFullName( const Dwarf::DIE & die, container & fullname, bool leaf = true ) {
    if ( die.getParentOffset() != 0 ) {
       const Dwarf::DIE & parent =
-         die.getUnit()->offsetToDIE( die.getParentOffset() );
+         die.getUnit()->offsetToDIE( 0, die.getParentOffset() );
       getFullName( parent, fullname, false );
    }
    if ( leaf || namespacetags.find( die.tag() ) != namespacetags.end() ) {
@@ -386,7 +386,7 @@ elf_units( PyObject * self, PyObject * args ) {
 
 static PyObject *
 elf_close( PyObject * self, PyObject * args ) {
-   PyElfObject * pye;
+   PyElfObject * pye = (PyElfObject *)self;
    pye->dwarf = nullptr;
    pye->obj = nullptr;
    return nullptr;
@@ -500,7 +500,7 @@ entry_iterator( PyObject * self ) {
       PyDwarfEntry * ent = ( PyDwarfEntry * )self;
       PyDwarfEntryIterator * it =
          PyObject_New( PyDwarfEntryIterator, &dwarfEntryIteratorType );
-      Dwarf::DIEList list = ent->die.children();
+      Dwarf::DIEChildren list = ent->die.children();
       new ( &it->begin ) Dwarf::DIEIter( list.begin() );
       new ( &it->end ) Dwarf::DIEIter( list.end() );
       return ( PyObject * )it;

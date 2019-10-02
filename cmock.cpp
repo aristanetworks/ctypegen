@@ -173,7 +173,8 @@ PreMock::callbackFor( void *got, void * func ) {
    auto & thunk = thunks[ got ];
    if ( thunk == nullptr ) {
       int rc = posix_memalign( &thunk, 4096, 8192 );
-      assert( rc == 0 );
+      if (rc != 0)
+          abort();
       void ** bufp = ( void ** )thunk;
       memcpy( thunk, cmock_thunk_function, cmock_thunk_end - cmock_thunk_function );
 
