@@ -201,6 +201,11 @@ class FunctionType( Type ):
       return [ child for child in self.die
             if child.tag() == tags.DW_TAG_formal_parameter ]
 
+   def linkerName( self ):
+      if self.die.DW_AT_linkage_name:
+         return self.die.DW_AT_linkage_name
+      return self.name()
+
    def define( self, out ):
       rtype = self.baseType()
       if rtype:
@@ -237,12 +242,12 @@ class FunctionDefType( FunctionType ):
       base = self.baseType()
       if base is not None:
          stream.write( u"%slib.%s.restype = %s\n" %
-               ( pad( indent ), self.name(), base.ctype() ) )
+               ( pad( indent ), self.linkerName(), base.ctype() ) )
       args = []
       for child in self.params():
          baseType = self.resolver.dieToType( child.DW_AT_type )
          args.append( baseType.ctype() )
-      stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), self.name() ) )
+      stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), self.linkerName() ) )
       if args:
          sep = u"["
          for arg in args:
@@ -934,7 +939,10 @@ class TypeResolver( object ):
          return None
 
       if tag == tags.DW_TAG_subprogram:
-         if name in namespace.functions and namespace.functions[ name ] is None:
+         # ignore DIEs with a specification - we'll pick up the specification
+         # DIE instead.
+         if ( not die.DW_AT_specification ) and name in namespace.functions \
+                 and namespace.functions[ name ] is None:
             namespace.functions[ name ] = die
             namespace.decUnresolved()
          return None
@@ -1028,7 +1036,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
             t.writeLibUpdates( 3, stream )
             ctypesProtos[ t.pyName() ] = t.ctype()
 
-      doFunctions( self.rootNamespace )
+      self.rootNamespace.recurse( doFunctions )
       stream.write( u'   pass\n' )
 
       if ctypesProtos:

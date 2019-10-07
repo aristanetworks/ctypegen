@@ -91,9 +91,13 @@ dieName( const Dwarf::DIE & die ) {
 template< typename container >
 static void
 getFullName( const Dwarf::DIE & die, container & fullname, bool leaf = true ) {
+   auto spec = die.attribute( Dwarf::DW_AT_specification );
+   if ( spec.valid() ) {
+      return getFullName( Dwarf::DIE( spec ), fullname, leaf );
+   }
    if ( die.getParentOffset() != 0 ) {
       const Dwarf::DIE & parent =
-         die.getUnit()->offsetToDIE( 0, die.getParentOffset() );
+         die.getUnit()->offsetToDIE( die.getParentOffset() );
       getFullName( parent, fullname, false );
    }
    if ( leaf || namespacetags.find( die.tag() ) != namespacetags.end() ) {
@@ -177,6 +181,11 @@ makeString( const std::string & s ) {
 
 extern "C" {
 
+// clang-format off
+// The foramtter does not like the PyObject_HEAD macros in the start of python
+// objects - they look like types preceding a field name. Disable while
+// we define our structure types.
+
 /*
  * Python representaiton of a loaded ELF object and it's DWARF debug data.
  */
@@ -196,6 +205,41 @@ typedef struct {
 } PyUnits;
 
 /*
+ * Python representation of an iterator over the child DIEs of a parent DIE
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::DIEIter begin;
+   Dwarf::DIEIter end;
+} PyDwarfEntryIterator;
+
+/*
+ * Python representation of an iterator over the Units in an object.
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::UnitIterator begin;
+   Dwarf::UnitIterator end;
+} PyDwarfUnitIterator;
+
+/*
+ * Python representaiton of a DWARF Unit
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::Unit::sptr unit;
+} PyDwarfUnit;
+
+/*
+ * Python representaiton of a DWARF information entry. (a DIE)
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::DIE die;
+   PyObject * fullName;
+} PyDwarfEntry;
+
+/*
  * Tabulate objects, members, and init functions for "attrs" and "types" objects
  * inside the libCTypeGen namespace that can be used to access the DWARF attribute
  * and tags values symbolically.
@@ -213,6 +257,7 @@ typedef struct {
 #include <libpstack/dwarf/tags.h>
 #undef DWARF_TAG
 } PyDwarfTagsObject;
+// clang-format on
 
 struct PyMemberDef attr_members[] = {
 #define DWARF_ATTR( name, value )                                                   \
@@ -286,69 +331,59 @@ tags_init( PyObject * object, PyObject * args, PyObject * kwds ) {
    return 0;
 };
 
-/*
- * Python representaiton of a DWARF Unit
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::Unit::sptr unit;
-} PyDwarfUnit;
-
-
 static PyObject *
 makeUnit( const Dwarf::Unit::sptr & unit ) {
    PyDwarfUnit * value = PyObject_New( PyDwarfUnit, &unitType );
-   new (&value->unit) Dwarf::Unit::sptr( unit );
+   new ( &value->unit ) Dwarf::Unit::sptr( unit );
    return ( PyObject * )value;
 }
 
 static void
-unit_free( PyObject *o ) {
-   PyDwarfUnit * value = (PyDwarfUnit *)o;
+unit_free( PyObject * o ) {
+   PyDwarfUnit * value = ( PyDwarfUnit * )o;
    value->unit.Dwarf::Unit::sptr::~sptr();
    unitType.tp_free( o );
 }
 
-
-/*
- * Python representaiton of a DWARF information entry. (a DIE)
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::DIE die;
-} PyDwarfEntry;
+static PyObject *
+makeFullname( const Dwarf::DIE & die ) {
+   std::deque< std::string > namelist;
+   getFullName( die, namelist );
+   auto fullName = PyTuple_New( namelist.size() );
+   size_t i = 0;
+   for ( const auto & item : namelist ) {
+      PyTuple_SET_ITEM( fullName, i, makeString( item ) );
+      i++;
+   }
+   return fullName;
+}
 
 static PyObject *
 makeEntry( const Dwarf::DIE & die ) {
    PyDwarfEntry * value = PyObject_New( PyDwarfEntry, &dwarfEntryType );
-   new (&value->die) Dwarf::DIE( die );
+   new ( &value->die ) Dwarf::DIE( die );
+   value->fullName = nullptr;
    return ( PyObject * )value;
 }
 
 static PyObject *
 unit_root( PyObject * self, PyObject * args ) {
-    PyDwarfUnit *unit  = ( PyDwarfUnit * )self;
-    return makeEntry(unit->unit->root());
+   PyDwarfUnit * unit = ( PyDwarfUnit * )self;
+   return makeEntry( unit->unit->root() );
 }
 
-/*
- * Python representation of an iterator over the child DIEs of a parent DIE
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::DIEIter begin;
-   Dwarf::DIEIter end;
-} PyDwarfEntryIterator;
+static PyObject *
+unit_purge( PyObject * self, PyObject * args ) {
+   PyDwarfUnit * unit = ( PyDwarfUnit * )self;
+   unit->unit->purge();
+   Py_RETURN_NONE;
+}
 
-/*
- * Python representation of an iterator over the Units in an object.
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::UnitIterator begin;
-   Dwarf::UnitIterator end;
-} PyDwarfUnitIterator;
-
+static PyObject *
+unit_dieCount( PyObject * self, PyObject * args ) {
+   PyDwarfUnit * unit = ( PyDwarfUnit * )self;
+   return PyLong_FromLong( unit->unit->entryCount() );
+}
 
 static Dwarf::ImageCache imageCache;
 
@@ -371,9 +406,18 @@ elf_open( PyObject * self, PyObject * args ) {
 }
 
 static PyObject *
+elf_verbose( PyObject * self, PyObject * args ) {
+   int verbosity;
+   if ( !PyArg_ParseTuple( args, "I", &verbosity ) )
+      return nullptr;
+   verbose = verbosity;
+   Py_RETURN_NONE;
+}
+
+static PyObject *
 elf_units( PyObject * self, PyObject * args ) {
    try {
-      PyElfObject *elf = (PyElfObject *)self;
+      PyElfObject * elf = ( PyElfObject * )self;
       PyUnits * units = PyObject_New( PyUnits, &unitsType );
       new ( &units->units ) Dwarf::Units( elf->dwarf->getUnits() );
       return ( PyObject * )units;
@@ -383,10 +427,9 @@ elf_units( PyObject * self, PyObject * args ) {
    }
 }
 
-
 static PyObject *
 elf_close( PyObject * self, PyObject * args ) {
-   PyElfObject * pye = (PyElfObject *)self;
+   PyElfObject * pye = ( PyElfObject * )self;
    pye->dwarf = nullptr;
    pye->obj = nullptr;
    return nullptr;
@@ -401,7 +444,7 @@ elf_findDefinition( PyObject * self, PyObject * args ) {
    std::vector< std::string > namelist;
    getFullName( die->die, namelist );
    for ( const auto & u : elf->dwarf->getUnits() ) {
-      const auto &top = u->root();
+      const auto & top = u->root();
       const auto & defn = findDefinition< std::vector< std::string > >(
          top, die->die.tag(), namelist.begin(), namelist.end() );
       if ( defn )
@@ -517,7 +560,8 @@ static PyObject *
 units_iterator( PyObject * self ) {
    try {
       PyUnits * units = ( PyUnits * )self;
-      PyDwarfUnitIterator * it = PyObject_New( PyDwarfUnitIterator, &unitsIteratorType );
+      PyDwarfUnitIterator * it =
+         PyObject_New( PyDwarfUnitIterator, &unitsIteratorType );
       new ( &it->begin ) Dwarf::UnitIterator( units->units.begin() );
       new ( &it->end ) Dwarf::UnitIterator( units->units.end() );
       return ( PyObject * )it;
@@ -526,8 +570,6 @@ units_iterator( PyObject * self ) {
       return nullptr;
    }
 }
-
-
 
 /*
  * Return the local name of the entry
@@ -664,6 +706,9 @@ static void
 entry_free( PyObject * self ) {
    auto entry = reinterpret_cast< PyDwarfEntry * >( self );
    entry->die.DIE::~DIE();
+   if ( entry->fullName ) {
+      Py_DECREF( entry->fullName );
+   }
    dwarfEntryType.tp_free( self );
 }
 
@@ -673,17 +718,12 @@ entry_free( PyObject * self ) {
  */
 static PyObject *
 entry_fullname( PyObject * self, PyObject * args ) {
-   std::deque< std::string > namelist;
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   const Dwarf::DIE & die = ent->die;
-   getFullName( die, namelist );
-   PyObject * tuple = PyTuple_New( namelist.size() );
-   size_t i = 0;
-   for ( const auto & item : namelist ) {
-      PyTuple_SET_ITEM( tuple, i, makeString( item ) );
-      i++;
+   if ( ent->fullName == 0 ) {
+      ent->fullName = makeFullname( ent->die );
    }
-   return tuple;
+   Py_INCREF( ent->fullName );
+   return ent->fullName;
 }
 
 /*
@@ -715,7 +755,6 @@ entryiter_free( PyObject * o ) {
    elfObjectType.tp_free( o );
 }
 
-
 /*
  * Get next DIE in a parent's iterator
  */
@@ -739,11 +778,10 @@ unititer_free( PyObject * o ) {
    unitsIteratorType.tp_free( o );
 }
 
-
-
 static PyMethodDef ctypegen_methods[] = {
    { "open", elf_open, METH_VARARGS, "open an ELF file to process" },
    { "close", elf_close, METH_VARARGS, "close an ELF file previously opened" },
+   { "verbose", elf_verbose, METH_VARARGS, "set verbosity" },
    { 0, 0, 0, 0 }
 };
 
@@ -756,19 +794,16 @@ static PyMethodDef elf_methods[] = {
    { 0, 0, 0, 0 }
 };
 
-static PyMethodDef units_methods[] = {
-   { 0, 0, 0, 0 }
-};
+static PyMethodDef units_methods[] = { { 0, 0, 0, 0 } };
 
 static PyMethodDef unit_methods[] = {
    { "root", unit_root, METH_VARARGS, "get root DIE of a unit" },
+   { "purge", unit_purge, METH_VARARGS, "purge any memory used by DIE trees" },
+   { "dieCount", unit_dieCount, METH_VARARGS, "get total number of DIEs in unit" },
    { 0, 0, 0, 0 }
 };
 
-
-static PyMethodDef unititer_methods[] = {
-   { 0, 0, 0, 0 }
-};
+static PyMethodDef unititer_methods[] = { { 0, 0, 0, 0 } };
 
 static PyMethodDef entry_methods[] = {
    { "tag", entry_type, METH_VARARGS, "get type of a DIE" },
@@ -902,7 +937,6 @@ initlibCTypeGen( void )
    unitType.tp_new = PyType_GenericNew;
    unitType.tp_methods = unit_methods;
 
-
    dwarfEntryIteratorType.tp_name = "libCTypeGen.DwarfEntryIterator";
    dwarfEntryIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;
    dwarfEntryIteratorType.tp_basicsize = sizeof( PyDwarfEntryIterator );
@@ -912,29 +946,22 @@ initlibCTypeGen( void )
    dwarfEntryIteratorType.tp_iter = entryiter_iter;
    dwarfEntryIteratorType.tp_iternext = entryiter_iternext;
 
-   if ( PyType_Ready( &elfObjectType ) >= 0 ) {
-      Py_INCREF( &elfObjectType );
-      PyModule_AddObject( module, "ElfObject", ( PyObject * )&elfObjectType );
-   }
-   if ( PyType_Ready( &dwarfEntryType ) >= 0 ) {
-      Py_INCREF( &dwarfEntryType );
-      PyModule_AddObject( module, "DwarfEntry", ( PyObject * )&dwarfEntryType );
-   }
-   if ( PyType_Ready( &unitsType ) >= 0 ) {
-      Py_INCREF( &unitsType );
-      PyModule_AddObject( module, "DwarfUnits", ( PyObject * )&unitsType );
-   }
-   if ( PyType_Ready( &dwarfEntryIteratorType ) >= 0 ) {
-      Py_INCREF( &dwarfEntryIteratorType );
-      PyModule_AddObject( module, "DwarfEntryIteratorType", ( PyObject * )&dwarfEntryIteratorType );
-   }
-   if ( PyType_Ready( &unitsIteratorType ) >= 0 ) {
-      Py_INCREF( &unitsType );
-      PyModule_AddObject( module, "DwarfUnitIterator", ( PyObject * )&unitsIteratorType );
-   }
-   if ( PyType_Ready( &unitType ) >= 0 ) {
-      Py_INCREF( &unitsType );
-      PyModule_AddObject( module, "DwarfUnitType", ( PyObject * )&unitType );
+   struct {
+      const char *name;
+      PyTypeObject *type;
+   } types[] = {
+       { "DwarfEntry", &dwarfEntryType },
+       { "DwarfEntryIterator", &elfObjectType },
+       { "DwarfUnitsIterator", &unitsIteratorType },
+       { "DwarfUnits", &unitsType},
+       { "DwarfUnit", &unitType },
+       { "ElfObject", &elfObjectType },
+   };
+   for (auto &descriptor : types) {
+       if (PyType_Ready( descriptor.type ) ) {
+          Py_INCREF( descriptor.type );
+          PyModule_AddObject( module, descriptor.name, ( PyObject * )descriptor.type );
+       }
    }
 #if PY_MAJOR_VERSION >= 3
    return module;

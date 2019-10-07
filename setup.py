@@ -19,8 +19,8 @@ from distutils import unixccompiler
 import os
 import subprocess
 
-pipe = subprocess.Popen( [ "uname", "-m" ], stdout=subprocess.PIPE )
-(out, err) = pipe.communicate()
+pipe = subprocess.Popen( [ "uname", "-i" ], stdout=subprocess.PIPE )
+( out, err ) = pipe.communicate()
 arch = out.strip()
 
 text = ""
