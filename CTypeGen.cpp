@@ -428,14 +428,6 @@ elf_units( PyObject * self, PyObject * args ) {
 }
 
 static PyObject *
-elf_close( PyObject * self, PyObject * args ) {
-   PyElfObject * pye = ( PyElfObject * )self;
-   pye->dwarf = nullptr;
-   pye->obj = nullptr;
-   return nullptr;
-}
-
-static PyObject *
 elf_findDefinition( PyObject * self, PyObject * args ) {
    PyDwarfEntry * die;
    PyElfObject * elf = ( PyElfObject * )self;
@@ -719,7 +711,7 @@ entry_free( PyObject * self ) {
 static PyObject *
 entry_fullname( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   if ( ent->fullName == 0 ) {
+   if ( ent->fullName == nullptr ) {
       ent->fullName = makeFullname( ent->die );
    }
    Py_INCREF( ent->fullName );
@@ -780,7 +772,6 @@ unititer_free( PyObject * o ) {
 
 static PyMethodDef ctypegen_methods[] = {
    { "open", elf_open, METH_VARARGS, "open an ELF file to process" },
-   { "close", elf_close, METH_VARARGS, "close an ELF file previously opened" },
    { "verbose", elf_verbose, METH_VARARGS, "set verbosity" },
    { 0, 0, 0, 0 }
 };
@@ -850,6 +841,7 @@ initlibCTypeGen( void )
       NULL, /* m_free */
    };
 
+   // Create our python module, and all our types.
    PyObject * module = PyModule_Create( &ctypeGenModule );
 #else
    PyObject * module =
@@ -873,22 +865,6 @@ initlibCTypeGen( void )
    dwarfTagsType.tp_members = tag_members;
    dwarfTagsType.tp_dealloc = nullptr;
    dwarfTagsType.tp_init = tags_init;
-
-   if ( PyType_Ready( &dwarfTagsType ) >= 0 ) {
-      auto tags = PyObject_New( PyObject, &dwarfTagsType );
-      tags->ob_type->tp_init( tags, nullptr, nullptr );
-      PyModule_AddObject( module, "tags", ( PyObject * )tags );
-   }
-   if ( PyType_Ready( &dwarfAttrsType ) >= 0 ) {
-      auto attrs = PyObject_New( PyObject, &dwarfAttrsType );
-      attrs->ob_type->tp_init( attrs, nullptr, nullptr );
-      PyModule_AddObject( module, "attrs", ( PyObject * )attrs );
-   }
-   attrnames = make_attrnames();
-   attrvalues = make_attrvalues();
-   tagnames = make_tagnames();
-   PyModule_AddObject( module, "attrnames", attrnames );
-   PyModule_AddObject( module, "tagnames", tagnames );
 
    elfObjectType.tp_name = "libCTypeGen.ElfObject";
    elfObjectType.tp_flags = Py_TPFLAGS_DEFAULT;
@@ -946,23 +922,44 @@ initlibCTypeGen( void )
    dwarfEntryIteratorType.tp_iter = entryiter_iter;
    dwarfEntryIteratorType.tp_iternext = entryiter_iternext;
 
+   // Add each type to the module.
    struct {
-      const char *name;
-      PyTypeObject *type;
+      const char * name;
+      PyTypeObject * type;
    } types[] = {
-       { "DwarfEntry", &dwarfEntryType },
-       { "DwarfEntryIterator", &elfObjectType },
-       { "DwarfUnitsIterator", &unitsIteratorType },
-       { "DwarfUnits", &unitsType},
-       { "DwarfUnit", &unitType },
-       { "ElfObject", &elfObjectType },
+      { "DwarfTags", &dwarfTagsType },
+      { "DwarfAttrs", &dwarfAttrsType },
+      { "DwarfEntry", &dwarfEntryType },
+      { "DwarfEntryIterator", &elfObjectType },
+      { "DwarfUnitsIterator", &unitsIteratorType },
+      { "DwarfUnits", &unitsType },
+      { "DwarfUnit", &unitType },
+      { "ElfObject", &elfObjectType },
    };
-   for (auto &descriptor : types) {
-       if (PyType_Ready( descriptor.type ) ) {
-          Py_INCREF( descriptor.type );
-          PyModule_AddObject( module, descriptor.name, ( PyObject * )descriptor.type );
-       }
+   for ( auto & descriptor : types ) {
+      if ( PyType_Ready( descriptor.type ) == 0 ) {
+         Py_INCREF( descriptor.type );
+         PyModule_AddObject(
+            module, descriptor.name, ( PyObject * )descriptor.type );
+      }
    }
+
+   // Add "tags" and "attrs" objects to name DWARF attribute and tag names
+   auto tags = PyObject_New( PyObject, &dwarfTagsType );
+   tags->ob_type->tp_init( tags, nullptr, nullptr );
+   PyModule_AddObject( module, "tags", ( PyObject * )tags );
+
+   auto attrs = PyObject_New( PyObject, &dwarfAttrsType );
+   attrs->ob_type->tp_init( attrs, nullptr, nullptr );
+   PyModule_AddObject( module, "attrs", ( PyObject * )attrs );
+
+   // add value->string mapping to name attributes and tags
+   attrnames = make_attrnames();
+   attrvalues = make_attrvalues();
+   tagnames = make_tagnames();
+   PyModule_AddObject( module, "attrnames", attrnames );
+   PyModule_AddObject( module, "tagnames", tagnames );
+
 #if PY_MAJOR_VERSION >= 3
    return module;
 #endif
