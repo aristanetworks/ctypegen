@@ -19,7 +19,9 @@
 
 extern "C" {
 extern int f( int ival, const char * sval, int * ipval );
+extern int g( int ival, const char * sval );
 extern void entry( int expect_return, int expect_i );
+extern void entry_g( int expect_return );
 }
 
 /*
@@ -33,6 +35,13 @@ f( int ival, const char * sval, int * ipval ) {
    return 1;
 }
 
+int
+g( int ival, const char * sval ) {
+    std::cout << "this is the real g " << ival << "/" << sval << "\n";
+    return 42;
+}
+
+
 /*
  * This is our function-under-test, that calls "f", and who's behaviour
  * we want to affect. It takes as arguments the values it expects
@@ -42,7 +51,14 @@ f( int ival, const char * sval, int * ipval ) {
 void
 entry( int expect_return, int expect_i ) {
    int i = 1;
+   g(42, "forty-two");
    int rv = f( i, "hello", &i );
    std::cout << "returned " << rv << ", i is now " << i << std::endl;
    assert( i == expect_i && rv == expect_return );
+}
+
+void
+entry_g( int expect_return ) {
+   int rc = g(42, "forty-two");
+   assert(rc == expect_return);
 }

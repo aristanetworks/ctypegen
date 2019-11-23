@@ -25,7 +25,10 @@ else:
    mocklib = "libMockTest.so"
 
 # Generate type info for "f", and "entry" so we can call them.
-module, resolver = generate( mocklib, "proggen.py", [], [ "f", "entry" ] )
+module, resolver = generate( mocklib,
+                             "proggen.py",
+                             [],
+                             [ "f", "g", "entry", "entry_g" ] )
 
 # Load the DLL, and decorate the functions with their prototypes.
 lib = CDLL( mocklib )
@@ -73,3 +76,18 @@ checkNotMocked()
 print( "checking we can re-enable the mock" )
 mockedF.enable()
 checkMocked()
+
+# Test STOMP mocks - mock out "g" called by "entry_g". The real g return 42,
+# the mocked one returns 99, and entry_g asserts g returns whatever is psased
+# to entry_g
+
+print( "checking STOMP mock" )
+@CMock.Mock( lib.g, lib, method=CMock.STOMP )
+def mockedG( i, s ):
+   print( "this is the mocked g %d/%s" % ( i, s ) )
+   assert( s == "forty-two" and i == 42 )
+   return 99
+
+lib.entry_g(99)
+mockedG.disable()
+lib.entry_g(42)

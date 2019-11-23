@@ -109,18 +109,23 @@ struct PreMock : public GOTMock {
  * be resolved at runtime, as they take a 32-bit relative offset )
  */
 struct StompMock {
+   // clang-format off
    PyObject_HEAD
-      // the i386 assembler to stomp over the function's prelude to enable the mock.
-      char enableCode[ 5 ];
+   static constexpr int savesize = __WORDSIZE == 32 ? 5 : 13;
+
+
+   // the i386 assembler to stomp over the function's prelude to enable the mock.
+   char enableCode[ savesize ];
 
    // the original code that was contained in the 5 bytes above.
-   char disableCode[ 5 ];
+   char disableCode[ savesize ];
 
    void * location; // the location in memory where we should do our stomping.
    StompMock( const char * name, void * callback, void * handle );
    void setState( bool );
    void enable() { setState( true ); }
    void disable() { setState( false ); }
+   // clang-format on
 };
 
 /*
@@ -304,12 +309,22 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
     * instruction to the callback.
     */
    unsigned char * insns = ( unsigned char * )location;
-   memcpy( disableCode, insns, 5 );
-   enableCode[ 0 ] = 0xe9;
-
-   // Calculate relative offset of jmp instruction, and insert that into our insn.
-   uintptr_t jmploc = ( unsigned char * )callback - ( insns + 5 );
-   memcpy( enableCode + 1, &jmploc, sizeof jmploc );
+   memcpy( disableCode, insns, savesize );
+   if constexpr (__WORDSIZE == 32 ) {
+       enableCode[ 0 ] = 0xe9;
+       // Calculate relative offset of jmp instruction, and insert that into our insn.
+       uintptr_t jmploc = ( unsigned char * )callback - ( insns + 5 );
+       memcpy( enableCode + 1, &jmploc, sizeof jmploc );
+   } else {
+       // movabsq <callback>, %r11
+       enableCode[0] = 0x49;
+       enableCode[1] = 0xbb;
+       memcpy( enableCode + 2, &callback, sizeof callback );
+       // jmp *%r11
+       enableCode[10] = 0x41;
+       enableCode[11] = 0xff;
+       enableCode[12] = 0xe3;
+   }
 }
 
 void
