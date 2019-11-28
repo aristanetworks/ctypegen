@@ -602,6 +602,7 @@ pyAttr( const Dwarf::Attribute & attr ) {
        case Dwarf::DW_FORM_data1:
        case Dwarf::DW_FORM_data2:
        case Dwarf::DW_FORM_data4:
+       case Dwarf::DW_FORM_sec_offset:
          return PyLong_FromLong( intmax_t( attr ) );
        case Dwarf::DW_FORM_sdata:
        case Dwarf::DW_FORM_data8:
