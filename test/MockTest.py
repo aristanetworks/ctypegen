@@ -85,7 +85,7 @@ print( "checking STOMP mock" )
 @CMock.Mock( lib.g, lib, method=CMock.STOMP )
 def mockedG( i, s ):
    print( "this is the mocked g %d/%s" % ( i, s ) )
-   assert( s == "forty-two" and i == 42 )
+   assert( s == b"forty-two" and i == 42 )
    return 99
 
 lib.entry_g(99)
