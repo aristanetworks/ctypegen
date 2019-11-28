@@ -310,7 +310,7 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
     */
    unsigned char * insns = ( unsigned char * )location;
    memcpy( disableCode, insns, savesize );
-   if constexpr (__WORDSIZE == 32 ) {
+   if /* constexpr */ (__WORDSIZE == 32 ) {
        enableCode[ 0 ] = 0xe9;
        // Calculate relative offset of jmp instruction, and insert that into our insn.
        uintptr_t jmploc = ( unsigned char * )callback - ( insns + 5 );
