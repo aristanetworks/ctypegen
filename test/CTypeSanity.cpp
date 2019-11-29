@@ -77,6 +77,21 @@ struct AnotherStruct {
 };
 AnotherStruct ExternalStruct = { .x = 42 };
 
+struct WithAnonStructUnion {
+    int field1;
+
+    struct {
+        int field2;
+        float field3;
+    };
+    int field4;
+    union {
+        int field5;
+        float field6;
+    };
+    int field7;
+};
+
 struct Foo {
    std::string aCppString;
    int anInt;
@@ -106,6 +121,7 @@ struct Foo {
    AProperCplusplusNamespace::AStructureInTheCplusplusNamespace
       aCplusplusNamespacedField;
    AnonEnumWithTypedef anonEnumField;
+   WithAnonStructUnion anonMemberField;
    char emptyArray[ 0 ];
 };
 

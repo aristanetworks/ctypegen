@@ -307,7 +307,7 @@ class Member( object ):
 
 class MemberType( Type ):
    ''' A struct, class  or union type - anything that has fields. '''
-   __slots__ = [ "members" ]
+   __slots__ = [ "members", "anonMembers" ]
 
    def __init__( self, resolver, die ):
       ''' MemberTypes can accept fieldHints - these are the names of types to
@@ -317,11 +317,13 @@ class MemberType( Type ):
       fields. '''
       super( MemberType, self ).__init__( resolver, die )
       self.members = []
+      self.anonMembers = set()
 
    def findMembers( self ):
       if self.members:
          return
       superCount = 0
+      anon_field = 0
       for field in self.definition():
          tag = field.tag()
          if field.DW_AT_external:
@@ -333,6 +335,10 @@ class MemberType( Type ):
             self.members.append( member )
          elif tag == tags.DW_TAG_member:
             member = Member( field, self.resolver )
+            if field.DW_AT_name is None:
+               anon_field += 1
+               member.setName( u"__anon__member__%d" % anon_field )
+               self.anonMembers.add( member )
             self.members.append( member )
 
          # Ignore things that don't contribute to the CType definition -
@@ -453,7 +459,13 @@ class MemberType( Type ):
                   ( member.pyName(), member.ctype(), member.bit_size() ) )
          else:
             out.write( u"   ( \"%s\", %s ),\n" % ( member.name(), member.ctype() ) )
-      out.write( u"]\n\n" )
+      out.write( u"]\n" )
+      if len( self.anonMembers ):
+          out.write( u"%s._anonymous_ = (\n" % self.pyName() )
+          for field in self.anonMembers:
+              out.write( u"   \"%s\",\n" % field.pyName() )
+          out.write( u"   )\n" )
+      out.write( u"\n" )
 
 class StructType( MemberType ):
    ''' A member type for a structure (or class) '''
