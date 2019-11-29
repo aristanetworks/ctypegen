@@ -157,6 +157,15 @@ assert module.TheEnum.Two == 2
 print( "Make sure 64-bit values are generated properly." )
 assert theCTypes.contents.bigEnum.value == module.BigNum.Big
 
+theCTypes.contents.anonMemberField.field1 = 1
+theCTypes.contents.anonMemberField.field2 = 2
+theCTypes.contents.anonMemberField.field3 = 3.0
+theCTypes.contents.anonMemberField.field4 = 4
+theCTypes.contents.anonMemberField.field5 = 5
+theCTypes.contents.anonMemberField.field5 = 5
+theCTypes.contents.anonMemberField.field6 = 6.0
+theCTypes.contents.anonMemberField.field7 = 7
+
 # We should be able to create some structures that are declared within
 # existing structures, or C++ namespaces.
 module.Foo_cn_cn_InANamespace()
