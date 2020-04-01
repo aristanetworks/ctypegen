@@ -174,6 +174,22 @@ def mocked( one, two, three ):
    return two
 ```
 
+You can also use CMock as a context manager. For example:
+
+```
+   def mockSend( sock, buf, size ):
+      log_write_to_socket( sock, buf, size )
+      return mockSend.realfunc( sock, buf, size )
+
+   with CMock.mocked( self.libc.sendmsg, mockSend ):
+      libhttp.get("http://www.arista,com/") # invokes send(2)
+
+```
+
+In this case, within the context of the "with" statement, the system
+call "send" will be Directed through "mockSend", which can log the data
+written to the socket, and eventually call the original function
+( Context manager is courtesy of lpenz@ )
 
 ## Links
 There are some slides from a presentation on this package
