@@ -51,6 +51,9 @@ def hasPointers( t ):
    hasPointersMemo[ t ] = rv
    return rv
 
+def raiseError( text ):
+   raise Exception( text )
+
 def checkUnalignedPtrs( t ):
 
    if not hasattr( t, "_fields_" ):
@@ -75,43 +78,43 @@ def checkUnalignedPtrs( t ):
 
       # misaligned field that is a/has pointers. This trips up valgrind.
       if fname not in allowed:
-         raise Exception( "unaligned ptr field %s in %s: offset=%d [%d]" % (
-                          fname, t.__name__, field.offset,
-                          field.offset % alignment ) )
+         raiseError( "unaligned ptr field %s in %s: offset=%d [%d]" % (
+                     fname, t.__name__, field.offset,
+                     field.offset % alignment ) )
 
 def checkSize( cls ):
    ''' If we've defined the class fully, ensure python and DWARF agree on
    the size '''
 
-   if not hasattr( cls, "have_definition" ):
+   if not hasattr( cls, "_ctypegen_have_definition" ):
       return
-   if ctypes.sizeof( cls ) == cls.native_size:
+   if ctypes.sizeof( cls ) == cls._ctypegen_native_size:
       # DWARF and python agree on size.
       return
-   if ctypes.sizeof( cls ) == 0 and cls.native_size == 1:
+   if ctypes.sizeof( cls ) == 0 and cls._ctypegen_native_size == 1:
       # empty C++ classes are size 1. We can let this discrepancy slide.
       return
-   raise Exception( "type %s has wrong size. expected %d, got %d" % (
-      cls.__name__, cls.native_size, ctypes.sizeof( cls ) ) )
+   raiseError( "type %s has wrong size. expected %d, got %d" % (
+               cls.__name__, cls._ctypegen_native_size, ctypes.sizeof( cls ) ) )
 
 def checkOffsets( cls ):
    ''' if we have _fields_ and offsets defined for the class, make sure they
    agree with the dwarf definitions. '''
-   if not hasattr( cls, "_fields_" ) or not hasattr( cls, "offsets" ):
+   if not hasattr( cls, "_fields_" ) or not hasattr( cls, "_ctypegen_offsets" ):
       return
 
    # pylint: disable=protected-access
-   for field, offset in zip( cls._fields_, cls.offsets ):
+   for field, offset in zip( cls._fields_, cls._ctypegen_offsets ):
       if offset is not None:
          ctypesOffset = getattr( cls, field[ 0 ] ).offset
          if ctypesOffset != offset:
-            raise Exception( "field %s of %s has offset %d, should be %d" %
-                  ( field[ 0 ], str( cls ), ctypesOffset, offset ) )
+            raiseError( "field %s of %s has offset %d, should be %d" %
+                        ( field[ 0 ], str( cls ), ctypesOffset, offset ) )
 
 def test_class( cls ):
+   checkOffsets( cls )
    checkSize( cls )
    checkUnalignedPtrs( cls )
-   checkOffsets( cls )
 
 def test_classes():
    # pylint: disable=no-member

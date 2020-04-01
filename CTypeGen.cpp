@@ -14,7 +14,14 @@
        limitations under the License.
 */
 
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wregister"
+#endif
 #include <Python.h>
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
 #include <structmember.h>
 
 #include <iostream>
@@ -341,7 +348,7 @@ makeUnit( const Dwarf::Unit::sptr & unit ) {
 static void
 unit_free( PyObject * o ) {
    PyDwarfUnit * value = ( PyDwarfUnit * )o;
-   value->unit.Dwarf::Unit::sptr::~sptr();
+   value->unit.std::shared_ptr< Dwarf::Unit >::~shared_ptr();
    unitType.tp_free( o );
 }
 

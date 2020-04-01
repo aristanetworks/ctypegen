@@ -14,23 +14,14 @@
        limitations under the License.
 */
 
-#include <stdio.h>
 #include <assert.h>
-#include <unistd.h>
 
 /*
- * Testing for the "pre" mock type. We preEntry calls preF with *ipval == 22,
- * but we expect it to run through the python wrapper, which changes *ipval to
- * 42.
+ * Testing for the "pre" mock type. preEntry calls preF with *ipval == 22, but
+ * we expect it to run through the python wrapper, which changes *ipval to 42.
+ * Because Clang does IPA between functions (even global functions) in the same
+ * unit, we cannot place preF in this file - it's defined in PreMockTestExtern.c
  */
-int
-preF( int ival, const char * sval, int * ipval ) {
-   assert( *ipval == 42 ); // should have been changed by the mock
-   printf( "preF(%d, %s, %p(%d))\n", ival, sval, ipval, *ipval );
-   *ipval = 24;
-   return 43;
-}
-
 void
 preEntry() {
    int val = 22;
@@ -38,13 +29,18 @@ preEntry() {
    assert( val == 24 ); // make sure the actual function is called.
 }
 
+// GCC >= 8 will not call thru the PLT for directly recursive functions, which
+// means we cannot properly mock out the recursive calls. We try our best for
+// indirect, mutually recursive functions, though.
+//
+// Again, clang goes through the PLT, but does interprocedural analysis on
+// global functions in the same translation unit, which means we need to put
+// this in a separate .c file.
+void preRecurse( int val );
+
 void
-preRecurse( int val ) {
-   if ( val > 1 )
-      preRecurse( val - 1 );
-   // do something non-trivial after the recursive call to prevent the compiler
-   // optimising the recursive tail call.
-   getpid();
+mutualRecurse( int val ) {
+   preRecurse( val );
 }
 
 void

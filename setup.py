@@ -21,7 +21,7 @@ import subprocess
 
 pipe = subprocess.Popen( [ "uname", "-i" ], stdout=subprocess.PIPE )
 ( out, err ) = pipe.communicate()
-arch = str(out.decode("utf-8")).strip()
+arch = str( out.decode( "utf-8" ) ).strip()
 
 text = ""
 

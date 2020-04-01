@@ -82,12 +82,13 @@ checkMocked()
 # to entry_g
 
 print( "checking STOMP mock" )
+
 @CMock.Mock( lib.g, lib, method=CMock.STOMP )
 def mockedG( i, s ):
    print( "this is the mocked g %d/%s" % ( i, s ) )
    assert( s == b"forty-two" and i == 42 )
    return 99
 
-lib.entry_g(99)
+lib.entry_g( 99 )
 mockedG.disable()
-lib.entry_g(42)
+lib.entry_g( 42 )
