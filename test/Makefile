@@ -22,12 +22,17 @@ all: check
 CTypeSanity: CTypeSanityC.o CTypeSanity.o
 	$(CXX) -shared -o $@ $^
 
-MockTest: MockTest.o
-	$(CXX) -shared -o $@ $^
-libPreMockTest.so: PreMockTest.o
+MockTest: MockTest.o MockTestExtern.o
 	$(CXX) -shared -o $@ $^
 
-check-bins: CTypeSanity MockTest libPreMockTest.so
+libPreMockTest.so: PreMockTest.o PreMockTestExtern.o
+	$(CXX) -shared -o $@ $^
+
+libChainTest.so: ChainTest.o ChainTestExtern.o
+	$(CXX) -shared -o $@ $^
+
+
+check-bins: CTypeSanity MockTest libPreMockTest.so libChainTest.so
 
 check-ctypesanity: check-bins
 	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
@@ -38,7 +43,12 @@ check-mock: check-bins
 check-pre-mock: check-bins
 	$(PYTHON) ./PreMockTest.py ./libPreMockTest.so
 
-check: check-mock check-pre-mock check-ctypesanity
+check-chain: check-bins
+	$(PYTHON) ./ChainTest.py ./libChainTest.so
+
+
+
+check: check-mock check-pre-mock check-ctypesanity check-chain
 
 clean:
 	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py

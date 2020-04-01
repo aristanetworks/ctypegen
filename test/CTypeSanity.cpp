@@ -13,6 +13,7 @@
        See the License for the specific language governing permissions and
        limitations under the License.
 */
+#define _GLIBCXX_DEBUG
 
 #include <stdlib.h>
 #include <iostream>
@@ -78,18 +79,18 @@ struct AnotherStruct {
 AnotherStruct ExternalStruct = { .x = 42 };
 
 struct WithAnonStructUnion {
-    int field1;
+   int field1;
 
-    struct {
-        int field2;
-        float field3;
-    };
-    int field4;
-    union {
-        int field5;
-        float field6;
-    };
-    int field7;
+   struct {
+      int field2;
+      float field3;
+   };
+   int field4;
+   union {
+      int field5;
+      float field6;
+   };
+   int field7;
 };
 
 struct Foo {

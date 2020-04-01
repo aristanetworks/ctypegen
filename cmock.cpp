@@ -14,9 +14,17 @@
        limitations under the License.
 */
 
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wregister"
+#endif
 #include <Python.h>
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
 #include <iostream>
 #include <map>
+#include <memory>
 
 #include <string.h>
 #include <assert.h>
@@ -70,6 +78,7 @@ protect( int perms, void * p, size_t len ) {
 struct GOTMock {
    PyObject_HEAD std::map< ElfW( Addr ), void * > replaced;
    void * callback;
+   uintptr_t realaddr;
    const char * function;
    GOTMock( const char * name_, void * callback_, void * handle_ );
    void processLibrary( const char *,
@@ -96,28 +105,39 @@ extern char cmock_thunk_end[];
 struct PreMock : public GOTMock {
    void enable();
    void * callbackFor( void *got, void *func );
-   std::map< void *, void * > thunks;
+
+   // To deallocate our posix_memalign'ed data, we need to replace
+   // the read/execute protection on it with read/write, and free(3)
+   // it
+   struct RawFree {
+      void operator()( void * p ) {
+         mprotect( p, 4096, PROT_READ | PROT_WRITE );
+         free( p );
+      }
+   };
+
+   std::map< void *, std::unique_ptr< void, RawFree > > thunks;
    PreMock( const char * name_, void * callback_, void * handle_ )
          : GOTMock( name_, callback_, handle_ ) {}
 };
 
 /*
- * Our function-code-stomping version. This _only_ works on i386
- * It is useful for when shared libraries are not compiled as PIC.
- * This is never needed on x86_64, because it does not generally
- * support non-PIC content in shared libraries. ( call instructions can't
- * be resolved at runtime, as they take a 32-bit relative offset )
+ * Our function-code-stomping version.
+ * It is useful for when shared libraries are not compiled as PIC, and for
+ * virtual functions where they are called through a vptr. The non-PIC variant
+ * is not useful on x86-64 in the default compilation modek, as non-PIC code
+ * can't be put in shared libraries.
  */
 struct StompMock {
    // clang-format off
    PyObject_HEAD
+   uintptr_t realaddr;
    static constexpr int savesize = __WORDSIZE == 32 ? 5 : 13;
 
-
-   // the i386 assembler to stomp over the function's prelude to enable the mock.
+   // the assembler to stomp over the function's prelude to enable the mock.
    char enableCode[ savesize ];
 
-   // the original code that was contained in the 5 bytes above.
+   // the original code that was contained in the bytes above.
    char disableCode[ savesize ];
 
    void * location; // the location in memory where we should do our stomping.
@@ -130,18 +150,14 @@ struct StompMock {
 
 /*
  * Construct a mock for function called name_, to call function callback_
- * if invoked from library handle (or any library, if handle == 0)
+ * Function is looked up with dlsym using handle (which can be RTLD_NEXT)
  */
 GOTMock::GOTMock( const char * name_, void * callback_, void * handle )
       : callback( callback_ ), function( name_ ) {
-   if ( handle == 0 ) {
-      // Override function in all libraries.
-      for ( auto map = _r_debug.r_map; map; map = map->l_next )
-         processLibrary( map->l_name, map->l_ld, map->l_addr, function );
-   } else {
-      auto map = static_cast< link_map * >( handle );
+   // Override function in all libraries.
+   for ( auto map = _r_debug.r_map; map; map = map->l_next )
       processLibrary( map->l_name, map->l_ld, map->l_addr, function );
-   }
+   realaddr = ( uintptr_t )dlsym( handle, name_ );
 }
 
 /*
@@ -177,11 +193,13 @@ void *
 PreMock::callbackFor( void *got, void * func ) {
    auto & thunk = thunks[ got ];
    if ( thunk == nullptr ) {
-      int rc = posix_memalign( &thunk, 4096, 8192 );
+      void * p;
+      int rc = posix_memalign( &p, 4096, 8192 );
       if ( rc != 0 )
          abort();
-      void ** bufp = ( void ** )thunk;
-      memcpy( thunk, cmock_thunk_function, cmock_thunk_end - cmock_thunk_function );
+      thunk.reset( p );
+      void ** bufp = ( void ** )p;
+      memcpy( p, cmock_thunk_function, cmock_thunk_end - cmock_thunk_function );
 
 #ifdef __LP64__
       bufp[ 1020 ] = &bufp[ 1019 ];
@@ -200,7 +218,7 @@ PreMock::callbackFor( void *got, void * func ) {
 #endif
       mprotect( bufp, 4096, PROT_READ | PROT_EXEC );
    }
-   return thunk;
+   return thunk.get();
 }
 
 /*
@@ -310,20 +328,20 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
     */
    unsigned char * insns = ( unsigned char * )location;
    memcpy( disableCode, insns, savesize );
-   if /* constexpr */ (__WORDSIZE == 32 ) {
-       enableCode[ 0 ] = 0xe9;
-       // Calculate relative offset of jmp instruction, and insert that into our insn.
-       uintptr_t jmploc = ( unsigned char * )callback - ( insns + 5 );
-       memcpy( enableCode + 1, &jmploc, sizeof jmploc );
+   if ( __WORDSIZE == 32 ) {
+      enableCode[ 0 ] = 0xe9;
+      // Calculate relative offset of jmp instruction, and insert that into our insn.
+      uintptr_t jmploc = ( unsigned char * )callback - ( insns + 5 );
+      memcpy( enableCode + 1, &jmploc, sizeof jmploc );
    } else {
-       // movabsq <callback>, %r11
-       enableCode[0] = 0x49;
-       enableCode[1] = 0xbb;
-       memcpy( enableCode + 2, &callback, sizeof callback );
-       // jmp *%r11
-       enableCode[10] = 0x41;
-       enableCode[11] = 0xff;
-       enableCode[12] = 0xe3;
+      // movabsq <callback>, %r11
+      enableCode[ 0 ] = 0x49;
+      enableCode[ 1 ] = 0xbb;
+      memcpy( enableCode + 2, &callback, sizeof callback );
+      // jmp *%r11
+      enableCode[ 10 ] = 0x41;
+      enableCode[ 11 ] = 0xff;
+      enableCode[ 12 ] = 0xe3;
    }
 }
 
@@ -349,7 +367,6 @@ newMock( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
    if ( !PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ) )
       return nullptr;
    new ( obj ) MockType( name, ( void * )callback, ( void * )handle );
-   obj->enable();
    return reinterpret_cast< PyObject * >( obj );
 }
 
@@ -370,10 +387,20 @@ disableMock( PyObject * self, PyObject * args ) {
 }
 
 template< typename T >
+static PyObject *
+realfuncMock( PyObject * self, PyObject * args ) {
+   auto * mock = reinterpret_cast< T * >( self );
+   return PyLong_FromLong( mock->realaddr );
+}
+
+template< typename T >
 static void
 freeMock( PyObject * self ) {
-   std::clog << "************ freeing mock!\n";
-   delete reinterpret_cast< T * >( self );
+   auto t = reinterpret_cast< T * >( self );
+   auto typ = Py_TYPE( self );
+   t->disable();
+   t->~T();
+   typ->tp_free( t );
 }
 
 /*
@@ -392,6 +419,7 @@ populateType( PyObject * module,
    static PyMethodDef methods[] = {
       { "enable", enableMock< T >, METH_VARARGS, "enable the mock" },
       { "disable", disableMock< T >, METH_VARARGS, "disable the mock" },
+      { "realfunc", realfuncMock< T >, METH_VARARGS, "get pointer to real method" },
       { 0, 0, 0, 0 }
    };
    pto.tp_name = name;
@@ -400,7 +428,7 @@ populateType( PyObject * module,
    pto.tp_methods = methods;
    pto.tp_doc = doc;
    pto.tp_new = newMock< T >;
-   pto.tp_del = freeMock< T >;
+   pto.tp_dealloc = freeMock< T >;
    if ( PyType_Ready( &pto ) >= 0 ) {
       Py_INCREF( &pto );
       PyModule_AddObject( module, name, ( PyObject * )&pto );

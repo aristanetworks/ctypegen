@@ -17,7 +17,7 @@ from ctypes import c_char, CDLL, c_void_p, c_long, c_int, cast, sizeof
 from ctypes import POINTER, c_char_p, c_ulong
 import sys
 
-from CTypeGen import generate, PythonType, generateOrThrow
+from CTypeGen import generate, PythonType
 
 if len( sys.argv ) >= 2:
    sanitylib = sys.argv[ 1 ]
@@ -68,18 +68,6 @@ def testwarning( txt ):
    warnings.append( txt )
 
 # test some common error cases:
-# Test non-existent file
-module, generator = generate(
-      "/nosuchfile",
-      "CTypeSanity.py",
-      types,
-      functions,
-      errorfunc=testwarning,
-      globalVars=globalVars )
-
-assert warnCount == 1
-assert "No such file" in warnings[ 0 ]
-clearWarnings()
 
 # Test filename not a string.
 module, generator = generate(
@@ -94,30 +82,20 @@ assert warnCount == 1
 assert "requires a list of ELF images" in warnings[ 0 ]
 clearWarnings()
 
-# Test file is not an ELF image
+# generate the module, complete with warnings
 module, generator = generate(
-      "Makefile",
-      "CTypeSanity.py",
-      types,
-      functions,
-      errorfunc=testwarning,
-      globalVars=globalVars )
-
-assert warnCount == 1
-assert "not an ELF" in warnings[ 0 ]
-clearWarnings()
-
-# Now actually generate the module, complete with warnings
-module, generator = generateOrThrow(
       [ sanitylib ],
       "CTypeSanity.py",
       types,
       functions,
       errorfunc=testwarning,
       globalVars=globalVars )
-assert warnCount == 3
-for warning in warnings:
-   assert "nosuch" in warning.lower() # expect three warnings about missing things
+
+# under "clang" we generate a warning because we cannot completely define
+# the content of std::string
+assert warnCount == 3 or ( warnCount == 5
+      and "failed to find definition for std::allocator" in warnings[ 1 ]
+      and "padded std::basic_string" in warnings[ 2 ] )
 clearWarnings()
 
 dll = CDLL( sanitylib )

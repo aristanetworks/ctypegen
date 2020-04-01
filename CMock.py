@@ -13,10 +13,9 @@
 #     limitations under the License.
 
 import sys
-from ctypes import CDLL, CFUNCTYPE, c_void_p
+from ctypes import CDLL, CFUNCTYPE, c_void_p, cast
 import site
 import glob
-from contextlib import contextmanager
 import libCTypeMock
 
 # We need to look inside ctypes a bit, so, pylint: disable=protected-access
@@ -40,9 +39,47 @@ for sitedir in site.getsitepackages():
 if cmockCdll is None:
    cmockCdll = CDLL( "libCTypeMock.so" )
 assert cmockCdll
-callbacks = []
 cmockCdll.cfuncTypeToPtrToFunc.restype = c_void_p
 cmockCdll.cfuncTypeToPtrToFunc.argtypes = [ c_void_p ]
+
+class mocked( object ):
+   def __init__( self, function, python, library=None, method=GOT, linkername=None ):
+      check_ctypes_decorations( function )
+      if linkername is None:
+         linkername = function.__name__
+      callbackReturnType = None if method == PRE else function.restype
+      callbackType = CFUNCTYPE( callbackReturnType, *function.argtypes,
+                                use_errno=True )
+      self.callback = callbackType( python )
+      callbackForC = cmockCdll.cfuncTypeToPtrToFunc( self.callback )
+      handle = library._handle if library else 0
+      if method == GOT:
+         self.mock = libCTypeMock.GOTMock( linkername, callbackForC, handle )
+         # "realfunc" only works for GOT mocks: STOMP mocks would just recurse
+         # infinitely.
+         self.realfunc = cast( self.mock.realfunc(), callbackType )
+         python.realfunc = self.realfunc # easy access from callback
+      elif method == STOMP:
+         self.mock = libCTypeMock.StompMock( linkername, callbackForC, handle )
+      elif method == PRE:
+         self.mock = libCTypeMock.PreMock( linkername, callbackForC, handle )
+      else:
+         assert False, "Unknown mock method %s" % method
+      python.disable = self.mock.disable
+      python.enable = self.mock.enable
+
+   def enable( self ):
+      self.mock.enable()
+
+   def disable( self ):
+      self.mock.disable()
+
+   def __enter__( self ):
+      self.enable()
+      return self
+
+   def __exit__( self, *kwargs ):
+      self.disable()
 
 class Mock( object ):
    ''' A decorator to have a python function replace a C function in a process
@@ -51,51 +88,30 @@ class Mock( object ):
    argtypes set on it correctly, and the python "mock" function you decorate
    should conform to that. CTypeGen can do this with decorateFunctions '''
 
-   def __init__( self, function, inlib=None, forlibs=None, method=None,
-           linkername=None ):
-      self.forlibs = forlibs
-      self.inlib = inlib
-      try:
-         iter( function.argtypes )
-      except TypeError:
-         sys.stderr.write( "no argument type information provided for function %s. "
-                           "Provide 'argtypes' manually, or generate with "
-                           "CTypeGen\n" % function.__name__ )
-         raise
-      self.callbackType = CFUNCTYPE( None if method == PRE else function.restype,
-                                     *function.argtypes )
+   def __init__( self, function, library=None, method=None, linkername=None ):
+      if method is None: # Default method to GOT for 64 bit, STOMP for 32 bit
+         method = GOT if sys.maxsize > 2**32 else STOMP
+      self.method = method
       self.function = function
-      if method is None:
-         # Defaults to GOT for 64 bit, STOMP for 32 bits
-         self.method = GOT if sys.maxsize > 2**32 else STOMP
-      else:
-         self.method = method
+      self.library = library
+      self.method = method
       self.linkername = linkername
-      self.mock = None
+      self.realfunc = None
 
-   def __call__( self, toMock ):
-      if self.linkername is None:
-         self.linkername = self.function.__name__
-      callback = self.callbackType( toMock )
-      callbackForC = cmockCdll.cfuncTypeToPtrToFunc( callback )
-      if self.method == GOT:
-         self.mock = libCTypeMock.GOTMock( self.linkername, callbackForC, 0 )
-      elif self.method == STOMP:
-         self.mock = libCTypeMock.StompMock( self.linkername, callbackForC,
-                 self.inlib._handle if self.inlib else 0 )
-      elif self.method == PRE:
-         self.mock = libCTypeMock.PreMock( self.linkername, callbackForC,
-                 self.inlib._handle if self.inlib else 0 )
-      else:
-         assert False, "Unknown mock method %s" % self.method
-      toMock.disable = self.mock.disable
-      toMock.enable = self.mock.enable
-      callbacks.append( ( callback, toMock ) )
-      return toMock
+   def __call__( self, python ):
+      mock = mocked( self.function, python, self.library, self.method,
+                     self.linkername )
+      mock.enable()
+      return mock
 
-@contextmanager
-def mocked( function, mock, *args, **kwargs ):
-   ''' Context manager for CMocks '''
-   mock = Mock( function, *args, **kwargs )( mock )
-   yield mock
-   mock.disable()
+def check_ctypes_decorations( function ):
+   ''' verify that someone has actually added a list of argument types to
+   the ctypes function object. Otherwise, nothing will work
+   '''
+   try:
+      iter( function.argtypes )
+   except TypeError:
+      sys.stderr.write( "no argument type information provided for function %s. "
+                        "Provide 'argtypes' manually, or generate with "
+                        "CTypeGen\n" % function.__name__ )
+      raise

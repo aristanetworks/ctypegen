@@ -76,7 +76,7 @@ cmock_thunk_function:
 	pop %r11
 
 	# Create a frame on the stack, and point r11 at it.
-	sub $72, STACKP - offset(%r11)
+	subq $72, STACKP - offset(%r11)
 	mov STACKP - offset (%r11), %r11
 
 	# save what we need - return address, args, chain pointer, RAX
@@ -96,17 +96,17 @@ cmock_thunk_function:
 	mov %rax, 64(%r11)
 
 	call .next4
-.next4:  .set offset,.next4 - cmock_thunk_function
+.next4:  .set offset4,.next4 - cmock_thunk_function
 	pop %r11
 
 	# Machine stack now contains no return address (it's in thunk stack)
-	call *CALLBACK1 - offset (%r11)
+	call *CALLBACK1 - offset4 (%r11)
 
 	call .next2
-.next2:  .set offset,.next2 - cmock_thunk_function
+.next2:  .set offset2,.next2 - cmock_thunk_function
 	pop %r11
 
-	mov STACKP - offset (%r11), %r11
+	mov STACKP - offset2 (%r11), %r11
 
 	mov 8(%r11), %rdi
 	mov 16(%r11), %rsi
@@ -118,16 +118,16 @@ cmock_thunk_function:
 	mov 64(%r11), %rax
 
 	call .next3
-.next3:  .set offset,.next3 - cmock_thunk_function
+.next3:  .set offset3,.next3 - cmock_thunk_function
 	pop %r11
 
 	# return address to our caller is on-stack - jump to the second callee.
-	call *CALLBACK2 - offset(%r11)
+	call *CALLBACK2 - offset3(%r11)
 
 	call .next5
-.next5:  .set offset,.next5 - cmock_thunk_function
+.next5:  .set offset5,.next5 - cmock_thunk_function
 	pop %r11
-	sub $offset, %r11
+	sub $offset5, %r11
 
 	# We can use the argument registers now - don't need to preserve them
 	mov GOTENT(%r11), %rdi
@@ -138,7 +138,7 @@ cmock_thunk_function:
 	mov %r11, (%rdi)
 
 .noupdate:
-	add $72, STACKP (%r11)
+	addq $72, STACKP (%r11)
 	mov STACKP (%r11), %r11
 
 	mov -72(%r11), %r11

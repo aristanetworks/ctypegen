@@ -36,7 +36,7 @@ $ sudo make PYTHON=python3 install
 $ make PYTHON=python3 test
 ```
 
-## Using
+## Generating Boilerplate
 `CTypeGen` saves you the misery of having to type out boilerplate code
 to create and interrogate C structures in python using python's `ctype` package.
 
@@ -84,6 +84,8 @@ CTypeGen.generate(["libname"], "libname.py", types, functions)
 ```
 And you'll magically have libname.py with the boilerplate generated for you.
 
+There are a number of examples run as part of the tests.
+
 ## Mocking
 
 There is an example of how to use this in test/MockTest.py. Basic usage is given
@@ -106,6 +108,88 @@ def mockedF( i, s, iptr ):
 
 Any function in your DLL that calls "f", will now call the python function
 mockedF instead.
+
+### Details
+
+The mocking code is somewhat experimental, but has been successfully used
+for testing in Arista. There are two distinct forms of mock functions,
+specified with the "method" argument (defaults to GOT on 64-bit, STOMP
+on 32-bit)
+
+The mocking code uses ctypes's ability to create valid C function pointers
+from python code. Internally, python uses libffi to do this, but once we have
+the ability to create such pointers, we can pass them to C code to call.
+
+GOT mocks use the "global offset table" used by the ELF dynamic
+linker. This GOT is used as a table of indirections to use when calling
+functions that are potentially provided by shared libraries other than
+the ELF object the caller is in. This can also include global symbols
+that are defined in that shared library that maybe "interposed" by other
+libraries at runtime. (Eg, if you have function "f" in your executable
+or shared object, but "f" is provided by a library that is loaded before
+the executable is resolved, then the version from the library is used,
+not the version in your executable.)
+
+On 32-bit i386, it's more common to see shared libraries that have
+not been compiled and linked as position-independent code (because
+the runtime linker can be more forgiving, and fix up function offsets
+in-place, which is costly in memory). On those platforms, we can use
+"STOMP" mocks.  These mocks work by overwriting the text of the function
+you want to mock out with a stub that calls the mock code.
+
+STOMP mocks have a number of restrictions - the function you call cannot
+be smaller than the stub code that gets written.
+
+In both cases, the ctypes/libffi derived function pointer we can extract
+from python is used as the target for the mocked function, and is used
+to overwrite the GOT or the target of the call instruction the STOMP
+mock adds.
+
+For GOT mocks, we also provide the ability to call the original function
+from the mocked one (this isn't possible for STOMP mocks, as the original
+function has been tampered with)
+
+For example, from tests/ChainTest.{c,py}, given:
+```
+int
+mockme( int one, int two, int three ) {
+   printf( "mockme(%d, %d, %d)\n", one, two, three );
+   return one;
+}
+
+int
+callme( int one, int two, int three ) {
+   return mockme( one, two, three );
+}
+```
+
+We can write this function to wrap the call to "mockme" in "lib"
+
+```
+@CMock.Mock( lib.mockme, lib, method=CMock.GOT )
+def mocked( one, two, three ):
+   print( "I mock you: %d %d %d" % ( one, two, three ) )
+   rc = mocked.realfunc( three, two, one )
+   assert rc == three
+   return two
+```
+
+You can also use CMock as a context manager. For example:
+
+```
+   def mockSend( sock, buf, size ):
+      log_write_to_socket( sock, buf, size )
+      return mockSend.realfunc( sock, buf, size )
+
+   with CMock.mocked( self.libc.sendmsg, mockSend ):
+      libhttp.get("http://www.arista,com/") # invokes send(2)
+
+```
+
+In this case, within the context of the "with" statement, the system
+call "send" will be Directed through "mockSend", which can log the data
+written to the socket, and eventually call the original function
+( Context manager is courtesy of lpenz@ )
 
 ## Links
 There are some slides from a presentation on this package

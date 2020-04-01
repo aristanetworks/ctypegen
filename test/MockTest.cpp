@@ -25,33 +25,18 @@ extern void entry_g( int expect_return );
 }
 
 /*
- * This is the underlying C++ implementation of our function, "f", that
- * we will mock.
- */
-int
-f( int ival, const char * sval, int * ipval ) {
-   std::cout << "f(" << ival << ", " << sval << ", " << ipval << ")" << std::endl;
-   *ipval = 2;
-   return 1;
-}
-
-int
-g( int ival, const char * sval ) {
-    std::cout << "this is the real g " << ival << "/" << sval << "\n";
-    return 42;
-}
-
-
-/*
  * This is our function-under-test, that calls "f", and who's behaviour
  * we want to affect. It takes as arguments the values it expects
  * "f" to return, so we can verify if we called the mocked function or the real
- * one
+ * one.
+ * We need to define "f" in a separate translation unit so clang will not do
+ * intraprocedural analysis and optimise away parts of "f" (even though it
+ * calls it through the PLT)
  */
 void
 entry( int expect_return, int expect_i ) {
    int i = 1;
-   g(42, "forty-two");
+   g( 42, "forty-two" );
    int rv = f( i, "hello", &i );
    std::cout << "returned " << rv << ", i is now " << i << std::endl;
    assert( i == expect_i && rv == expect_return );
@@ -59,6 +44,6 @@ entry( int expect_return, int expect_i ) {
 
 void
 entry_g( int expect_return ) {
-   int rc = g(42, "forty-two");
-   assert(rc == expect_return);
+   int rc = g( 42, "forty-two" );
+   assert( rc == expect_return );
 }

@@ -51,17 +51,17 @@ cmock_thunk_function:
 
 	call .next2
 .next2:
-.set offset,.next2 - cmock_thunk_function
+.set offset2,.next2 - cmock_thunk_function
 	pop %eax
 
-	call *CALLBACK2 - offset(%eax)
+	call *CALLBACK2 - offset2(%eax)
 
 
 	call .next3
 .next3:
-.set offset,.next3 - cmock_thunk_function
+.set offset3,.next3 - cmock_thunk_function
 	pop %edx
-	sub $offset, %edx
+	sub $offset3, %edx
 
 	# The second call was to the "real" function, except in the event
 	# that the GOT entry was still pointing to the PLT thunk. In that case,
