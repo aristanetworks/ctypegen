@@ -22,7 +22,12 @@ extern int f( int ival, const char * sval, int * ipval );
 extern int g( int ival, const char * sval );
 extern void entry( int expect_return, int expect_i );
 extern void entry_g( int expect_return );
+int callCpp(int a, int b);
 }
+
+namespace A { namespace Cpp { namespace Namespace {
+extern int withAFunction(int a, int b);
+} } }
 
 /*
  * This is our function-under-test, that calls "f", and who's behaviour
@@ -46,4 +51,9 @@ void
 entry_g( int expect_return ) {
    int rc = g( 42, "forty-two" );
    assert( rc == expect_return );
+}
+
+
+int callCpp(int a, int b) {
+   return A::Cpp::Namespace::withAFunction( a, b );
 }

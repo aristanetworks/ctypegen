@@ -22,6 +22,15 @@ install:
 	env CFLAGS="-g -O0 --std=c++14" $(PYTHON) ./setup.py install
 test:
 	make -C test
+
+dbghelper.o: CFLAGS=-O0 -g -fPIC
+libdbghelper.so: dbghelper.o
+	$(CC) -g --shared -o $@ $^
+
+
+# Generate helpers for libc.
+libc.py: libdbghelper.so
+	$(PYTHON) ./generateLibc.py /lib*/libc.so.6 libc.py
 clean:
-	rm -rf build __pycache__ core
+	rm -rf build __pycache__ core libc.py libdbghelper.so *.o
 	make -C test clean

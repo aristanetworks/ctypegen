@@ -20,6 +20,7 @@ import io
 import imp
 import inspect
 import sys
+import keyword
 from collections import defaultdict
 
 # the following modules are dynamically generated inside the C extension.
@@ -86,6 +87,8 @@ def asPythonId( s ):
          prevWasEscaped = False
    out = output.getvalue()
    output.close()
+   if keyword.iskeyword( out ):
+      out = out + "_"
    return out
 
 def pad( indent ):
@@ -180,16 +183,10 @@ class Type( object ):
       return self._name is not None
 
    def name( self ):
-      ''' Return the name of the structure - if there's no name in the DWARF
-      info, we fabricate one based on the type descriptors offset in the DWARF. '''
-      if self._name:
-         res = self._name
-      else:
-         res = u"anon_%s" % self.die.offset()
-
+      assert self._name
       if self.resolver.pkgname is not None:
-         return u'%s.%s' % ( self.resolver.pkgname, res )
-      return res
+         return u'%s.%s' % ( self.resolver.pkgname, self._name )
+      return self._name
 
    def ctype( self ):
       ''' Return the string representing the ctype type for this type.
@@ -221,11 +218,6 @@ class FunctionType( Type ):
       ''' return all formal parameters to the function defined herein '''
       return [ child for child in self.die
             if child.tag() == tags.DW_TAG_formal_parameter ]
-
-   def linkerName( self ):
-      if self.die.DW_AT_linkage_name:
-         return self.die.DW_AT_linkage_name
-      return self.name()
 
    def define( self, out ):
       rtype = self.baseType()
@@ -262,21 +254,43 @@ class FunctionDefType( FunctionType ):
    def writeLibUpdates( self, indent, stream ):
       """Write function's prototype to stream"""
       base = self.baseType()
-      stream.write( u"%slib.%s.restype = %s\n" %
-           ( pad( indent ), self.linkerName(), base.ctype() if base else "None" ) )
-      args = []
-      for child in self.params():
-         baseType = self.resolver.dieToType( child.DW_AT_type )
-         args.append( baseType.ctype() )
-      stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), self.linkerName() ) )
-      if args:
-         sep = u"["
-         for arg in args:
-            stream.write( u"%s\n%s%s" % ( sep, pad( indent + 3 ), arg ) )
-            sep = ","
-         stream.write( u" ]\n\n" )
-      else:
-         stream.write( u"[]\n\n" )
+      name = self.die.DW_AT_linkage_name
+      if name is None:
+         name = self.name()
+      dynNames = self.die.object().dynnames().get( name )
+      if dynNames is None:
+         self.resolver.errorfunc( "cannot provide access to %s - "
+                                  " not in dynamic symbol table" % self.name() )
+         return
+
+      for linkername in dynNames:
+         if keyword.iskeyword( linkername ):
+            self.resolver.errorfunc( "cannot provide access to %s - "
+                  "its dynamic name %s is a python keyword" %
+                  ( self.name(), linkername ) )
+            continue
+
+         stream.write( u"%sif hasattr(lib, '%s'):\n" % (
+                       pad( indent ), linkername ) )
+         indent += 3
+         stream.write( u"%slib.%s.restype = %s\n" %
+              ( pad( indent ), linkername, base.ctype() if base else "None" ) )
+         args = []
+
+         for child in self.params():
+            baseType = self.resolver.dieToType( child.DW_AT_type )
+            args.append( baseType.ctype() )
+
+         stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), linkername ) )
+         if args:
+            sep = u"["
+            for arg in args:
+               stream.write( u"%s\n%s%s" % ( sep, pad( indent + 3 ), arg ) )
+               sep = ","
+            stream.write( u" ]\n\n" )
+         else:
+            stream.write( u"[]\n\n" )
+         indent -= 3
 
 class Member( object ):
    ''' A single member in a struct, union, class etc. '''
@@ -578,23 +592,14 @@ class EnumType( Type ):
          if child.tag() == tags.DW_TAG_enumerator:
             value = child.DW_AT_const_value
             name = asPythonId( child.DW_AT_name )
-            out.write( u"%s%s = %s(%d).value # 0x%x\n" % (
-               indent, name, self.intType(), value, value ) )
+            out.write( u"%s%s = %s(%d).value # %s\n" % (
+               indent, name, self.intType(), value, hex( value ) ) )
       out.write( u"\n\n" )
       return True
 
    def intType( self ):
-      size = self.definition().DW_AT_byte_size
-      if size == 4:
-         return u"c_uint32"
-      if size == 8:
-         return u"c_uint64"
-      if size == 2:
-         return u"c_uint16"
-      if size == 1:
-         return u"c_byte"
-      raise Exception( u"don't know what type to use for %d byte enum" %
-            self.size() )
+      primitive = self.resolver.dieToType( self.definition().DW_AT_type )
+      return primitive.pyName()
 
 class PrimitiveType( Type ):
    ''' Primitive types from DWARF/C: map to a python ctype primitive '''
@@ -604,18 +609,22 @@ class PrimitiveType( Type ):
          u"long long int" : u"c_longlong",
          u"long unsigned int" : u"c_ulong",
          u"short unsigned int" : u"c_ushort",
+         u"unsigned short" : u"c_ushort",
          u"unsigned int" : u"c_uint",
          u"unsigned char" : u"c_ubyte",
-         u"signed char" : u"c_char",
+         u"char16_t" : u"c_short",
+         u"signed char" : u"c_byte",
          u"char" : u"c_char",
          u"long int" : u"c_long",
          u"int" : u"c_int",
          u"short int" : u"c_short",
+         u"short" : u"c_short",
          u"float" : u"c_float",
          u"_Bool" : u"c_bool",
          u"bool" : u"c_bool",
          u"double" : u"c_double",
          u"long double" : u"c_longdouble",
+         u"__int128" : u"(c_longlong * 2)",
          u"wchar_t" : u"c_wchar",
    }
 
@@ -780,6 +789,7 @@ typeFromTag = {
       tags.DW_TAG_typedef : Typedef,
       tags.DW_TAG_pointer_type : PointerType,
       tags.DW_TAG_reference_type : PointerType, # just pretend.
+      tags.DW_TAG_rvalue_reference_type : PointerType, # just pretend.
       tags.DW_TAG_subroutine_type : FunctionType,
       tags.DW_TAG_structure_type : StructType,
       tags.DW_TAG_class_type : StructType,
@@ -805,7 +815,6 @@ class Namespace( object ):
 
    __slots__ = [ "types", "variables", "functions",
          "subspaces", "parent", "name_", "resolver" ]
-
 
    def __init__( self, parent, resolver, name ):
 
@@ -912,7 +921,6 @@ class TypeResolver( object ):
 
    def __init__( self, libnames, requiredTypes, functions, existingTypes, errorfunc,
                  globalVars, deepInspect, namelessEnums, namespaceFilter ):
-
 
       self.dwarves = [ libCTypeGen.open( libname ) for libname in libnames ]
       self.typesByDieKey = {}
@@ -1060,9 +1068,10 @@ class TypeResolver( object ):
          # Just decend compile units without affecting any namespace scope
          return namespace
 
+      if die.DW_AT_name is None:
+         return None # Ignore anything without its own name
+
       name = die.name()
-      if name is None:
-         return None # We won't find anything in nested namespaces here.
 
       if tag == tags.DW_TAG_variable:
          if ( self.globalsFilter( name, namespace, die )
@@ -1074,6 +1083,7 @@ class TypeResolver( object ):
          # ignore DIEs with a specification - we'll pick up the specification
          # DIE instead.
          if ( not die.DW_AT_specification
+                 and not die.DW_AT_declaration
                  and self.functionsFilter( name, namespace, die )
                  and namespace.functions[ name ] is None ):
             namespace.functions[ name ] = die
@@ -1088,7 +1098,7 @@ class TypeResolver( object ):
             namespace.types[ name ].type = self.dieToType( die )
 
       # If its a struct or namespace, and we're interested in any DIEs inside
-      # the namespace, decend it.
+      # the namespace, descend it.
       if tag in TypeResolver.namespaceDieTags:
          if self.namespaceFilter( name, namespace, die ):
             return namespace.subspaces[ name ]

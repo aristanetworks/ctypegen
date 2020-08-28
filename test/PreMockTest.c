@@ -16,6 +16,8 @@
 
 #include <assert.h>
 
+
+extern int preF( int ival, const char * sval, int * ipval );
 /*
  * Testing for the "pre" mock type. preEntry calls preF with *ipval == 22, but
  * we expect it to run through the python wrapper, which changes *ipval to 42.

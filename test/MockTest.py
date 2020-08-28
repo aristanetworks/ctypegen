@@ -15,7 +15,7 @@
 from __future__ import print_function
 
 import sys
-from ctypes import CDLL
+import ctypes
 from CTypeGen import generate
 import CMock
 
@@ -31,7 +31,9 @@ module, resolver = generate( mocklib,
                              [ "f", "g", "entry", "entry_g" ] )
 
 # Load the DLL, and decorate the functions with their prototypes.
-lib = CDLL( mocklib )
+# We use RTLD_GLOBAL so the mocking framework does not need to be passed the
+# handle to the dlopen'd library to find the symbol for the named function
+lib = ctypes.CDLL( mocklib, ctypes.RTLD_GLOBAL )
 module.decorateFunctions( lib )
 
 # if f is not mocked, we expect the behaviour from the C function
@@ -65,13 +67,41 @@ mockedF.disable()
 checkNotMocked()
 
 print( "check context manager" )
-with CMock.mocked( lib.f, pythonF, method=CMock.GOT ) as mock:
+with CMock.mocked( lib.f, pythonF ) as mock:
    checkMocked()
    mock.disable()
    checkNotMocked()
    mock.enable()
    checkMocked()
 checkNotMocked()
+
+print( "check mocked member function" )
+# Uses the same logic as mockedF above - make sure we can call instance methods
+# as if they were C functions.
+
+class MockObject( object ):
+   def method( self, ival, sval, ipval ):
+      self.callcount += 1
+      if self.actuallyMock:
+         ipval[ 0 ] = 101
+         return 100
+      else:
+         return self.mock.realfunc( ival, sval, ipval )
+
+   def __init__( self ):
+      self.actuallyMock = False
+      self.callcount = 0
+      self.mock = CMock.mocked( lib.f, self.method )
+      checkNotMocked() # it's not enabled.
+      self.mock.enable()
+      checkNotMocked() # it's enabled, but the mock function will check behaviour
+      self.actuallyMock = True
+      checkMocked() # It's enabled, and should do its work
+      self.mock.disable()
+      checkNotMocked() # it's disabled again.
+      assert self.callcount == 2
+
+MockObject()
 
 print( "checking we can re-enable the mock" )
 mockedF.enable()
@@ -83,7 +113,7 @@ checkMocked()
 
 print( "checking STOMP mock" )
 
-@CMock.Mock( lib.g, lib, method=CMock.STOMP )
+@CMock.Mock( lib.g, method=CMock.STOMP )
 def mockedG( i, s ):
    print( "this is the mocked g %d/%s" % ( i, s ) )
    assert( s == b"forty-two" and i == 42 )
@@ -92,3 +122,24 @@ def mockedG( i, s ):
 lib.entry_g( 99 )
 mockedG.disable()
 lib.entry_g( 42 )
+
+print( "check calls to C++ functions via name demangling" )
+function = CMock.mangleFunc( lib, "A::Cpp::Namespace::withAFunction",
+      ctypes.c_int, [ ctypes.c_int, ctypes.c_int ] )
+called = 0
+
+@CMock.Mock( function )
+def mockedIt( a, b ):
+   global called
+   called += 1
+   assert a == 42 and b == 42
+   return a + b
+
+rc = lib.callCpp( 42, 42 )
+assert called == 1
+assert rc == 42 + 42 # Mock function returns sum of arguments.
+mockedIt.disable()
+rc = lib.callCpp( 42, 42 )
+assert rc == 42 * 42 # Real function returns product of arguments.
+
+print( "Tests complete" )

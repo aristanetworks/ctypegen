@@ -33,14 +33,53 @@
 #include <link.h>
 #include <elf.h>
 #include <fcntl.h>
+#include <cxxabi.h>
 
 #include <sys/mman.h>
+#include <regex.h>
 
 #if __WORDSIZE == 32
 #define ELF_R_SYM( reloc ) ELF32_R_SYM( reloc )
+typedef Elf32_Sym Elf_Sym;
+typedef Elf32_Dyn Elf_Dyn;
+typedef Elf32_Ehdr Elf_Ehdr;
+typedef Elf32_Shdr Elf_Shdr;
 #else
 #define ELF_R_SYM( reloc ) ELF64_R_SYM( reloc )
+typedef Elf64_Sym Elf_Sym;
+typedef Elf64_Dyn Elf_Dyn;
+typedef Elf64_Ehdr Elf_Ehdr;
+typedef Elf64_Shdr Elf_Shdr;
 #endif
+
+// https://flapenguin.me/elf-dt-gnu-hash
+struct gnu_hash_table {
+   uint32_t nbuckets;
+   uint32_t symoffset;
+   uint32_t bloom_size;
+   uint32_t bloom_shift;
+#if 0
+    uint64_t bloom[bloom_size]; /* uint32_t for 32-bit binaries */
+    uint32_t buckets[nbuckets];
+    uint32_t chain[];
+#endif
+};
+
+static inline const long *
+gnu_hash_bloom( const gnu_hash_table * table, size_t idx ) {
+   const long * ptr = ( const long * )( table + 1 );
+   return ptr + idx;
+}
+
+static inline const uint32_t *
+gnu_hash_bucket( const gnu_hash_table * table, size_t idx ) {
+   return ( const uint32_t * )gnu_hash_bloom( table, table->bloom_size ) + idx;
+}
+
+static inline const uint32_t *
+gnu_hash_chain( const gnu_hash_table * table, size_t idx ) {
+   return gnu_hash_bucket( table, table->nbuckets ) + idx - table->symoffset;
+}
 
 /*
  * protect the memory from p thru p + len to be as provided in perms. page-aligns
@@ -104,7 +143,7 @@ extern char cmock_thunk_end[];
 
 struct PreMock : public GOTMock {
    void enable();
-   void * callbackFor( void *got, void *func );
+   void * callbackFor( void * got, void * func );
 
    // To deallocate our posix_memalign'ed data, we need to replace
    // the read/execute protection on it with read/write, and free(3)
@@ -190,7 +229,7 @@ GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
 }
 
 void *
-PreMock::callbackFor( void *got, void * func ) {
+PreMock::callbackFor( void * got, void * func ) {
    auto & thunk = thunks[ got ];
    if ( thunk == nullptr ) {
       void * p;
@@ -229,7 +268,7 @@ PreMock::enable() {
    for ( auto & addr : replaced ) {
       auto p = ( void ** )addr.first;
       protect( PROT_READ | PROT_WRITE, p, sizeof callback );
-      *p = callbackFor( (void *)addr.first, ( void * )addr.second );
+      *p = callbackFor( ( void * )addr.first, ( void * )addr.second );
    }
 }
 
@@ -435,6 +474,152 @@ populateType( PyObject * module,
    }
 }
 
+static PyObject *
+cmock_mangle( PyObject * self, PyObject * args ) {
+   // Given a shared library handle, and RE, return a list of tuples, giving
+   // (unmangled, mangled) name in the library.
+
+   const char * regexText;
+   unsigned long int iHandle;
+   if ( !PyArg_ParseTuple( args, "ks", &iHandle, &regexText ) ) {
+      return nullptr;
+   }
+
+   // Get the library's link-map
+   void * handle = ( void * )iHandle;
+   struct link_map * lm;
+   int rc = dlinfo( handle, RTLD_DI_LINKMAP, &lm );
+   if ( rc != 0 ) {
+      PyErr_SetString( PyExc_RuntimeError, dlerror() );
+      return nullptr;
+   }
+
+   // Find sections we are interested in - symbol table, string table, hash table.
+   const Elf_Sym * symbols = nullptr;
+   const char * strings = nullptr;
+   const uint32_t * hash = nullptr;
+   const gnu_hash_table * gnu_hash = nullptr;
+
+   for ( auto dyn = lm->l_ld; dyn->d_tag != DT_NULL; ++dyn ) {
+      switch ( dyn->d_tag ) {
+       case DT_SYMTAB:
+         symbols = ( const Elf_Sym * )dyn->d_un.d_ptr;
+         break;
+       case DT_STRTAB:
+         strings = ( const char * )dyn->d_un.d_ptr;
+         break;
+       case DT_GNU_HASH:
+         gnu_hash = ( const gnu_hash_table * )dyn->d_un.d_ptr;
+         break;
+       case DT_HASH:
+         hash = ( const uint32_t * )dyn->d_un.d_ptr;
+         break;
+       default:
+         break; // don't care about anything else.
+      }
+   }
+
+   if ( gnu_hash == nullptr && hash == nullptr ) {
+      PyErr_SetString( PyExc_RuntimeError, "no symbol hash table found" );
+      return nullptr;
+   }
+
+   if ( symbols == nullptr ) {
+      PyErr_SetString( PyExc_RuntimeError, "no symbol table found" );
+      return nullptr;
+   }
+
+   if ( strings == nullptr ) {
+      PyErr_SetString( PyExc_RuntimeError, "no string table found" );
+      return nullptr;
+   }
+
+   regex_t regex;
+   rc = regcomp( &regex, regexText, REG_EXTENDED | REG_NOSUB );
+   if ( rc != 0 ) {
+      char buf[ 1024 ];
+      regerror( rc, &regex, buf, sizeof buf );
+      PyErr_SetString( PyExc_RuntimeError, buf );
+      return nullptr;
+   }
+
+   size_t outbuf_size = 1024;
+   char * demangled = ( char * )malloc( outbuf_size );
+   auto list = PyList_New( 0 );
+
+   // Because the section headers are not loaded into the process at runtime,
+   // there is no simple marker anywhere in the process to work out where the
+   // section table ends/how big it is. The only option is to walk the hash
+   // table (either GNU or SYSV). If we find neither version of the hash table,
+   // we can't continue.
+   //
+   // Because we have to process the hash anyway, and because the hash table
+   // will automatically filter out undefined and private symbols, we actually
+   // process the symbols as we do this walk, rather than just working out how
+   // big the "symbols" array is, as it avoids accessing symbols we don't care
+   // about. (And, in reality, the symbol indexes are ordered, so the accesses
+   // are actually contiguous anyhow.
+
+   auto processSymbol = [&]( const Elf_Sym & sym ) {
+      auto tuple = PyTuple_New( 2 );
+
+      assert( sym.st_shndx != SHN_UNDEF );
+      auto name = strings + sym.st_name;
+      if ( name[ 0 ] != '_' || name[ 1 ] != 'Z' )
+         return; // only interested in C++ names.
+      int status = 0;
+
+      char * newbuf = abi::__cxa_demangle( name, demangled, &outbuf_size, &status );
+      if ( newbuf == nullptr || status != 0 )
+         return;
+      demangled = newbuf; // __cxa_demangle may pass "demangled" through realloc.
+      int rc = regexec( &regex, demangled, 0, nullptr, 0 );
+      if ( rc != 0 )
+         return;
+      PyTuple_SetItem( tuple, 0, PyUnicode_FromString( demangled ) );
+      PyTuple_SetItem( tuple, 1, PyUnicode_FromString( name ) );
+      PyList_Append( list, tuple );
+   };
+
+   if ( gnu_hash != nullptr ) {
+      // Walk .gnu_hash
+      for ( int bucket = 0; bucket < gnu_hash->nbuckets; ++bucket ) {
+         const uint32_t * bucketword = gnu_hash_bucket( gnu_hash, bucket );
+         auto idx = *bucketword;
+         if ( idx != 0 ) {
+            // Process non-empty chain
+            for ( ;; idx++ ) {
+               processSymbol( symbols[ idx ] );
+               if ( ( *gnu_hash_chain( gnu_hash, idx ) & 1 ) != 0 )
+                  break;
+            }
+         }
+      }
+   } else {
+      // Walk .hash
+      uint32_t nbuckets = hash[ 0 ];
+      const uint32_t * buckets = hash + 2;
+      const uint32_t * chains = buckets + nbuckets;
+      for ( int bucket = 0; bucket < nbuckets; ++bucket )
+         for ( int idx = buckets[ bucket ]; idx != STN_UNDEF; idx = chains[ idx ] ) {
+            auto & sym = symbols[ idx ];
+            if ( sym.st_shndx != SHN_UNDEF )
+               processSymbol( sym );
+         }
+   }
+   free( demangled );
+   regfree( &regex );
+   return list;
+}
+
+static PyMethodDef mock_methods[] = {
+   { "mangle",
+     cmock_mangle,
+     METH_VARARGS,
+     "convert regex for C++ function to mangled names" },
+   { 0, 0, 0, 0 }
+};
+
 /*
  * Initialize python library
  */
@@ -451,7 +636,7 @@ initlibCTypeMock( void )
       "libCTypeMock", /* m_name */
       "CTypeMock C support", /* m_doc */
       -1, /* m_size */
-      NULL, /* m_methods */
+      mock_methods, /* m_methods */
       NULL, /* m_reload */
       NULL, /* m_traverse */
       NULL, /* m_clear */
@@ -459,7 +644,8 @@ initlibCTypeMock( void )
    };
    PyObject * module = PyModule_Create( &ctypeMockModule );
 #else
-   PyObject * module = Py_InitModule3( "libCTypeMock", NULL, "CTypeMock C support" );
+   PyObject * module =
+      Py_InitModule3( "libCTypeMock", mock_methods, "CTypeMock C support" );
 #endif
    populateType< StompMock >(
       module, stompObjectType, "StompMock", "A stomping mock" );

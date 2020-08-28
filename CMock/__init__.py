@@ -1,4 +1,4 @@
-# Copyright 2018 Arista Networks.
+# Copyright 2020 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,10 +43,9 @@ cmockCdll.cfuncTypeToPtrToFunc.restype = c_void_p
 cmockCdll.cfuncTypeToPtrToFunc.argtypes = [ c_void_p ]
 
 class mocked( object ):
-   def __init__( self, function, python, library=None, method=GOT, linkername=None ):
+   def __init__( self, function, python, library=None, method=GOT ):
       check_ctypes_decorations( function )
-      if linkername is None:
-         linkername = function.__name__
+      linkername = function.__name__
       callbackReturnType = None if method == PRE else function.restype
       callbackType = CFUNCTYPE( callbackReturnType, *function.argtypes,
                                 use_errno=True )
@@ -58,15 +57,12 @@ class mocked( object ):
          # "realfunc" only works for GOT mocks: STOMP mocks would just recurse
          # infinitely.
          self.realfunc = cast( self.mock.realfunc(), callbackType )
-         python.realfunc = self.realfunc # easy access from callback
       elif method == STOMP:
          self.mock = libCTypeMock.StompMock( linkername, callbackForC, handle )
       elif method == PRE:
          self.mock = libCTypeMock.PreMock( linkername, callbackForC, handle )
       else:
          assert False, "Unknown mock method %s" % method
-      python.disable = self.mock.disable
-      python.enable = self.mock.enable
 
    def enable( self ):
       self.mock.enable()
@@ -88,21 +84,35 @@ class Mock( object ):
    argtypes set on it correctly, and the python "mock" function you decorate
    should conform to that. CTypeGen can do this with decorateFunctions '''
 
-   def __init__( self, function, library=None, method=None, linkername=None ):
-      if method is None: # Default method to GOT for 64 bit, STOMP for 32 bit
-         method = GOT if sys.maxsize > 2**32 else STOMP
+   # Default method to GOT for 64 bit, STOMP for 32 bit
+   def __init__( self, function, library=None,
+         method=( GOT if sys.maxsize > 2**32 else STOMP ) ):
       self.method = method
       self.function = function
       self.library = library
-      self.method = method
-      self.linkername = linkername
       self.realfunc = None
 
    def __call__( self, python ):
-      mock = mocked( self.function, python, self.library, self.method,
-                     self.linkername )
+      mock = mocked( self.function, python, self.library, self.method )
       mock.enable()
       return mock
+
+def mangleFunc( lib, mangledname, restype=None, argtypes=None ):
+   mangled = libCTypeMock.mangle( lib._handle, mangledname )
+   assert len( mangled ) == 1, \
+         "regex must match exactly one symbol in %s" % lib._name
+   func = getattr( lib, mangled[ 0 ][ 1 ] )
+   if restype is not None:
+      func.restype = restype
+   if argtypes is not None:
+      func.argtypes = argtypes
+   return func
+
+def mangleData( lib, ctype, mangledname ):
+   mangled = libCTypeMock.mangle( lib._handle, mangledname )
+   assert len( mangled ) == 1, \
+         "regex must match exactly one symbol in %s" % lib._name
+   return ctype.in_dll( lib, mangled[ 0 ][ 1 ] )
 
 def check_ctypes_decorations( function ):
    ''' verify that someone has actually added a list of argument types to

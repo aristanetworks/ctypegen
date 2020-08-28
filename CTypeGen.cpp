@@ -60,6 +60,121 @@ static std::set< Dwarf::Tag > namespacetags = {
    Dwarf::DW_TAG_union_type,
 };
 
+} // namespace
+
+extern "C" {
+
+// clang-format off
+// The formatter does not like the PyObject_HEAD macros in the start of python
+// objects - they look like types preceding a field name. Disable while
+// we define our structure types.
+
+/*
+ * Python representaiton of a loaded ELF object and it's DWARF debug data.
+ */
+
+typedef struct {
+   PyObject_HEAD
+   Elf::Object::sptr obj;
+   Dwarf::Info::sptr dwarf;
+   PyObject *dynnames; // dict mapping debug name to list-of-dynamic name.
+   int fileId;
+} PyElfObject;
+
+// Give each file loaded a unique ID to ensure anonymous names are unique
+static std::map< const Dwarf::Info *, PyElfObject * > openFiles;
+static int nextFileId = 1;
+
+/*
+ * Python representaiton of the "Units" collection from an object.
+ * This provides a forward iterator over the units of the object.
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::Units units;
+} PyUnits;
+
+/*
+ * Python representation of an iterator over the child DIEs of a parent DIE
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::DIEIter begin;
+   Dwarf::DIEIter end;
+} PyDwarfEntryIterator;
+
+/*
+ * Python representation of an iterator over the Units in an object.
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::UnitIterator begin;
+   Dwarf::UnitIterator end;
+} PyDwarfUnitIterator;
+
+/*
+ * Python representaiton of a DWARF Unit
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::Unit::sptr unit;
+} PyDwarfUnit;
+
+/*
+ * Python representaiton of a DWARF information entry. (a DIE)
+ */
+typedef struct {
+   PyObject_HEAD
+   Dwarf::DIE die;
+   PyObject * fullName;
+} PyDwarfEntry;
+
+/*
+ * Tabulate objects, members, and init functions for "attrs" and "types" objects
+ * inside the libCTypeGen namespace that can be used to access the DWARF attribute
+ * and tags values symbolically.
+ */
+typedef struct {
+   PyObject_HEAD
+#define DWARF_ATTR( name, value ) int name;
+#include <libpstack/dwarf/attr.h>
+#undef DWARF_ATTR
+} PyDwarfAttrsObject;
+
+typedef struct {
+   PyObject_HEAD
+#define DWARF_TAG( name, value ) int name;
+#include <libpstack/dwarf/tags.h>
+#undef DWARF_TAG
+} PyDwarfTagsObject;
+// clang-format on
+
+struct PyMemberDef attr_members[] = {
+#define DWARF_ATTR( name, value )                                                   \
+   { ( char * )#name,                                                               \
+     T_INT,                                                                         \
+     offsetof( PyDwarfAttrsObject, name ),                                          \
+     0,                                                                             \
+     ( char * )#name },
+#include <libpstack/dwarf/attr.h>
+#undef DWARF_ATTR
+   { NULL }
+};
+
+struct PyMemberDef tag_members[] = {
+#define DWARF_TAG( name, value )                                                    \
+   { ( char * )#name,                                                               \
+     T_INT,                                                                         \
+     offsetof( PyDwarfTagsObject, name ),                                           \
+     0,                                                                             \
+     ( char * )#name },
+#include <libpstack/dwarf/tags.h>
+#undef DWARF_TAG
+   { NULL }
+};
+}
+
+namespace {
 /*
  * Return the name of a DIE.
  * If the DIE has a name attribute, that's returned.
@@ -70,8 +185,10 @@ dieName( const Dwarf::DIE & die ) {
    const Dwarf::Attribute & name = die.attribute( Dwarf::DW_AT_name );
    if ( name.valid() )
       return std::string( name );
+
    std::ostringstream os;
-   os << "anon_" << die.getOffset();
+   os << "anon_" << openFiles[ die.getUnit()->dwarf ]->fileId << "_"
+      << die.getOffset();
    switch ( die.tag() ) {
     case Dwarf::DW_TAG_structure_type:
       os << "_struct";
@@ -188,108 +305,6 @@ makeString( const std::string & s ) {
 
 extern "C" {
 
-// clang-format off
-// The foramtter does not like the PyObject_HEAD macros in the start of python
-// objects - they look like types preceding a field name. Disable while
-// we define our structure types.
-
-/*
- * Python representaiton of a loaded ELF object and it's DWARF debug data.
- */
-typedef struct {
-   PyObject_HEAD
-   Elf::Object::sptr obj;
-   Dwarf::Info::sptr dwarf;
-} PyElfObject;
-
-/*
- * Python representaiton of the "Units" collection from an object.
- * This provides a forward iterator over the units of the object.
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::Units units;
-} PyUnits;
-
-/*
- * Python representation of an iterator over the child DIEs of a parent DIE
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::DIEIter begin;
-   Dwarf::DIEIter end;
-} PyDwarfEntryIterator;
-
-/*
- * Python representation of an iterator over the Units in an object.
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::UnitIterator begin;
-   Dwarf::UnitIterator end;
-} PyDwarfUnitIterator;
-
-/*
- * Python representaiton of a DWARF Unit
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::Unit::sptr unit;
-} PyDwarfUnit;
-
-/*
- * Python representaiton of a DWARF information entry. (a DIE)
- */
-typedef struct {
-   PyObject_HEAD
-   Dwarf::DIE die;
-   PyObject * fullName;
-} PyDwarfEntry;
-
-/*
- * Tabulate objects, members, and init functions for "attrs" and "types" objects
- * inside the libCTypeGen namespace that can be used to access the DWARF attribute
- * and tags values symbolically.
- */
-typedef struct {
-   PyObject_HEAD
-#define DWARF_ATTR( name, value ) int name;
-#include <libpstack/dwarf/attr.h>
-#undef DWARF_ATTR
-} PyDwarfAttrsObject;
-
-typedef struct {
-   PyObject_HEAD
-#define DWARF_TAG( name, value ) int name;
-#include <libpstack/dwarf/tags.h>
-#undef DWARF_TAG
-} PyDwarfTagsObject;
-// clang-format on
-
-struct PyMemberDef attr_members[] = {
-#define DWARF_ATTR( name, value )                                                   \
-   { ( char * )#name,                                                               \
-     T_INT,                                                                         \
-     offsetof( PyDwarfAttrsObject, name ),                                          \
-     0,                                                                             \
-     ( char * )#name },
-#include <libpstack/dwarf/attr.h>
-#undef DWARF_ATTR
-   { NULL }
-};
-
-struct PyMemberDef tag_members[] = {
-#define DWARF_TAG( name, value )                                                    \
-   { ( char * )#name,                                                               \
-     T_INT,                                                                         \
-     offsetof( PyDwarfTagsObject, name ),                                           \
-     0,                                                                             \
-     ( char * )#name },
-#include <libpstack/dwarf/tags.h>
-#undef DWARF_TAG
-   { NULL }
-};
-
 static int
 attr_init( PyObject * object, PyObject * args, PyObject * kwds ) {
    auto attrs = ( PyDwarfAttrsObject * )object;
@@ -405,6 +420,16 @@ elf_open( PyObject * self, PyObject * args ) {
       PyElfObject * val = PyObject_New( PyElfObject, &elfObjectType );
       new ( &val->obj ) std::shared_ptr< Elf::Object >( obj );
       new ( &val->dwarf ) std::shared_ptr< Dwarf::Info >( dwarf );
+      val->dynnames = nullptr;
+
+      // DW_AT_linker_name attributes refer to the name of the symbol in .symtabv
+      // We are more interested in the name for dynamic linking - so we can decorate
+      // its types, and refer to it for mocking. These maps allow us to convert from
+      // a DW_AT_linker_name to an address, and from there to a list of candidate
+      // dynamic symbols at that address. They don't always match up, because of
+      // aliases, weak bindings, etc.
+      openFiles[ dwarf.get() ] = val;
+      val->fileId = nextFileId++;
       return ( PyObject * )val;
    } catch ( const std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
@@ -434,6 +459,50 @@ elf_units( PyObject * self, PyObject * args ) {
    }
 }
 
+/*
+ * Returns a dict mapping names from .symtab (debug symbols) to a list of names
+ * in .dynsym (used for linking). The Dwarf tree matches what's in the debug
+ * table, but the dynamic section can name things a little differently
+ */
+
+static PyObject *
+elf_dynnames( PyObject * self, PyObject * args ) {
+   PyElfObject * pyelf = ( PyElfObject * )self;
+   if ( pyelf->dynnames == nullptr ) {
+      pyelf->dynnames = PyDict_New();
+      std::map< Elf::Addr, PyObject * > addr2dynname;
+      auto obj = pyelf->dwarf->elf;
+
+      // First, create mapping from addr to list-of-dynamic-name
+      for ( const auto sym : obj->commonSections->dynamicSymbols ) {
+         if ( sym.symbol.st_shndx == SHN_UNDEF )
+            continue;
+         if ( sym.isHidden() )
+            continue;
+         auto & list = addr2dynname[ sym.symbol.st_value ];
+         if ( list == nullptr ) {
+            list = PyList_New( 0 );
+         }
+         PyList_Append( list, makeString( sym.name ) );
+      }
+
+      // Now map from debug symbol name to list-of-dynamic-symbol-names
+      for ( const auto & sym : obj->commonSections->debugSymbols ) {
+         auto dyn = addr2dynname.find( sym.symbol.st_value );
+         if ( dyn == addr2dynname.end() )
+            continue;
+         auto key = makeString( sym.name );
+         Py_INCREF( dyn->second );
+         PyDict_SetItem( pyelf->dynnames, key, dyn->second );
+      }
+      // Clean up all our addr->dyn references.
+      for ( auto i : addr2dynname )
+         Py_DECREF( i.second );
+   }
+   Py_INCREF( pyelf->dynnames );
+   return pyelf->dynnames;
+}
+
 static PyObject *
 elf_findDefinition( PyObject * self, PyObject * args ) {
    PyDwarfEntry * die;
@@ -456,8 +525,11 @@ elf_findDefinition( PyObject * self, PyObject * args ) {
 static void
 elf_free( PyObject * o ) {
    PyElfObject * pye = ( PyElfObject * )o;
+   openFiles.erase( pye->dwarf.get() );
    pye->obj.std::shared_ptr< Elf::Object >::~shared_ptr< Elf::Object >();
    pye->dwarf.std::shared_ptr< Dwarf::Info >::~shared_ptr< Dwarf::Info >();
+   if ( pye->dynnames != nullptr )
+      Py_DECREF( pye->dynnames );
    elfObjectType.tp_free( o );
 }
 
@@ -472,6 +544,14 @@ static PyObject *
 entry_type( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
    return PyLong_FromLong( ent->die.tag() );
+}
+
+static PyObject *
+entry_object( PyObject * self, PyObject * args ) {
+   PyDwarfEntry * ent = ( PyDwarfEntry * )self;
+   PyElfObject * pyelf = openFiles[ ent->die.getUnit()->dwarf ];
+   Py_INCREF( pyelf );
+   return ( PyObject * )pyelf;
 }
 
 /*
@@ -599,23 +679,33 @@ entry_file( PyObject * self, PyObject * args ) {
 }
 
 static PyObject *
-pyAttr( const Dwarf::Attribute & attr ) {
+pyAttr( Dwarf::AttrName name, const Dwarf::Attribute & attr ) {
    try {
       if ( !attr.valid() )
          Py_RETURN_NONE;
       switch ( attr.form() ) {
        case Dwarf::DW_FORM_addr:
          return PyLong_FromUnsignedLongLong( uintmax_t( attr ) );
+
+         // Assume "data" types are unsigned, unless we know better (eg,
+         // DW_AT_upper_bound is set to 2^31-1/-1 by gcc)
        case Dwarf::DW_FORM_data1:
        case Dwarf::DW_FORM_data2:
        case Dwarf::DW_FORM_data4:
        case Dwarf::DW_FORM_sec_offset:
-         return PyLong_FromLong( intmax_t( attr ) );
+         if ( name == Dwarf::DW_AT_upper_bound )
+            return PyLong_FromLong( intmax_t( attr ) );
+         return PyLong_FromUnsignedLong( uintmax_t( attr ) );
+
        case Dwarf::DW_FORM_sdata:
-       case Dwarf::DW_FORM_data8:
          return PyLong_FromLongLong( intmax_t( attr ) );
+
        case Dwarf::DW_FORM_udata:
+       case Dwarf::DW_FORM_data8:
+         if ( name == Dwarf::DW_AT_upper_bound )
+            return PyLong_FromLongLong( intmax_t( attr ) );
          return PyLong_FromUnsignedLongLong( uintmax_t( attr ) );
+
        case Dwarf::DW_FORM_GNU_strp_alt:
        case Dwarf::DW_FORM_string:
        case Dwarf::DW_FORM_strp:
@@ -659,8 +749,9 @@ pyAttr( const Dwarf::Attribute & attr ) {
 static PyObject *
 entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
    const auto pyEntry = ( PyDwarfEntry * )self;
-   const Dwarf::Attribute & attr = pyEntry->die.attribute( Dwarf::AttrName( idx ) );
-   return pyAttr( attr );
+   auto name = Dwarf::AttrName( idx );
+   const Dwarf::Attribute & attr = pyEntry->die.attribute( name );
+   return pyAttr( name, attr );
 }
 
 /*
@@ -671,8 +762,9 @@ entry_get_attrs( PyObject * self, PyObject * args ) {
    auto namedict = PyDict_New();
    const auto & die = reinterpret_cast< PyDwarfEntry * >( self )->die;
    for ( const auto & attr : die.attributes() ) {
-      PyDict_SetItem(
-         namedict, PyLong_FromLong( attr.first ), pyAttr( attr.second ) );
+      PyDict_SetItem( namedict,
+                      PyLong_FromLong( attr.first ),
+                      pyAttr( attr.first, attr.second ) );
    }
    return namedict;
 }
@@ -687,7 +779,7 @@ entry_get_attrs_by_name( PyObject * self, PyObject * args ) {
    for ( const auto & attr : die.attributes() ) {
       PyObject * attrname =
          PyDict_GetItem( attrnames, PyLong_FromLong( attr.first ) );
-      PyDict_SetItem( namedict, attrname, pyAttr( attr.second ) );
+      PyDict_SetItem( namedict, attrname, pyAttr( attr.first, attr.second ) );
    }
    return namedict;
 }
@@ -786,6 +878,10 @@ static PyMethodDef ctypegen_methods[] = {
 
 static PyMethodDef elf_methods[] = {
    { "units", elf_units, METH_VARARGS, "get a list of unit-level DWARF entries" },
+   { "dynnames",
+     elf_dynnames,
+     METH_VARARGS,
+     "get a name from the dynamic symbol table to match one in the debug table" },
    { "findDefinition",
      elf_findDefinition,
      METH_VARARGS,
@@ -821,6 +917,7 @@ static PyMethodDef entry_methods[] = {
      entry_fullname,
      METH_VARARGS,
      "get full name of a DIE (as tuple, with entry for each namesace)" },
+   { "object", entry_object, METH_VARARGS, "get ELF object associated with DIE" },
    { 0, 0, 0, 0 }
 };
 
