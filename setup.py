@@ -19,9 +19,12 @@ from distutils import unixccompiler
 import os
 import subprocess
 
-pipe = subprocess.Popen( [ "uname", "-i" ], stdout=subprocess.PIPE )
+pipe = subprocess.Popen( [ "uname", "-m" ], stdout=subprocess.PIPE )
 ( out, err ) = pipe.communicate()
 arch = str( out.decode( "utf-8" ) ).strip()
+if arch == "i686":
+    arch = "i386"
+
 
 text = ""
 
