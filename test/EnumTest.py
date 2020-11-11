@@ -12,15 +12,21 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import re
 import ctypes
 import CTypeGen
 import libCTypeGen
+import sys
 from libCTypeGen import tags
 
-dll = ctypes.CDLL( "libEnumTest.so" )
+if len( sys.argv ) >= 2:
+   mocklib = sys.argv[ 1 ]
+else:
+   mocklib = "libEnumTest.so"
+
+dll = ctypes.CDLL( mocklib )
 
 # The variables we are interested in for testFullRange below are named, eg,
 # s16t, u32t, s64t Our regex puts "s" or "u" in group 1, and the bitcount (8,
@@ -66,7 +72,7 @@ def testFullRange( name, match ):
    else:
       assert enumeration.start == 0
       assert enumeration.end == ( 1 << bits ) - 1
-   assert ctypes.sizeof( type( enumeration ).__bases__[ 0 ] ) == bits / 8
+   assert ctypes.sizeof( type( enumeration ).__bases__[ 0 ] ) == bits // 8
 
 def testAllBits():
    # This test checks that an enum with values for all powers of 2 from 0 to 63

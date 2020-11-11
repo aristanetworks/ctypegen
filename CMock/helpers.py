@@ -36,27 +36,49 @@ def verifyCalls( realfunc, expectedCalls ):
       yield
    assert mockfunc.calls == expectedCalls
 
+# Create a function that will accept whatever args are passed, set errno, and return
+# the given value. Useful as a mockfunc argument for FakeSyscall
+def setErrnoAndReturnFn( error, rv=-1 ):
+   def call( rv, error, *args ):
+      ctypes.set_errno( error )
+      return rv
+   return lambda *args : call(rv, error, *args)
+
 class FakeSyscall( CMock.mocked ):
    ''' Allows calling a "fake" system call. The first "start" invocations will
    be executed normally, the next count-start invocations will set errno to the
    configured value, and return the returncode with errno set as requested. '''
 
-   def __init__( self, func, rv, errno, start=0, count=10000 ):
+   def __init__( self, func, mockfunc, start=0, count=10000 ):
       super( FakeSyscall, self ).__init__( func, self )
-      self.rv = rv
-      self.errno = errno
       self.calls = 0
       self.start = start
       self.count = count
+      self.mockfunc = mockfunc
 
    def __call__( self, *args ):
       if self.calls < self.start or self.calls >= self.start + self.count:
          rv = self.realfunc( *args )
       else:
-         ctypes.set_errno( self.errno )
-         rv = self.rv
+         rv = self.mockfunc( *args )
       self.calls += 1
       return rv
+
+class FakeFdSyscall( FakeSyscall ):
+   ''' A mock for a syscall that takes an fd as its first argument.
+   Works like FakeSyscall, but only treats calls that are passed the given FD
+   as the first argument. onFd can be None, in which case the behaviour is exactly
+   as per FakeSyscall
+   '''
+   def __init__( self, func, mockfunc, onFd, **kargs ):
+      super( FakeFdSyscall, self ).__init__( func, mockfunc, **kargs )
+      self.onFd = onFd
+
+   def __call__( self, fd, *args ):
+      if self.onFd == fd or self.onFd is None:
+         return super( FakeFdSyscall, self ).__call__( fd, *args )
+      return self.realfunc( fd, *args )
+
 
 def _decorateSyscalls( libc ):
    ''' Decorate libc system calls with type information.  We do this manually,
@@ -68,7 +90,7 @@ def _decorateSyscalls( libc ):
       field.restype = res
       field.argtypes = args
 
-   from ctypes import c_int, c_void_p, POINTER, c_uint, c_long
+   from ctypes import c_int, c_void_p, POINTER, c_uint, c_long, c_ulong
    proto( c_int, libc.getsockopt,
           [ c_int, c_int, c_int, c_void_p, POINTER( c_uint ) ] )
    proto( c_int, libc.connect, [ c_int, c_void_p, c_uint ] )
@@ -79,6 +101,8 @@ def _decorateSyscalls( libc ):
    proto( c_long, libc.recv, [ c_int, c_void_p, c_int, c_int ] )
    proto( c_int, libc.sendmsg, [ c_int, c_void_p, c_int ] )
    proto( c_int, libc.accept, [ c_int, c_void_p, POINTER( c_uint ) ] )
+   proto( c_int, libc.ioctl, [ c_int, c_int, POINTER( c_long ) ] )
+   proto( c_long, libc.send, [ c_int, c_void_p, c_ulong, c_int ] )
 
 def getLibc():
    ''' load and decorate libc functions. Returns reference to libc, and the

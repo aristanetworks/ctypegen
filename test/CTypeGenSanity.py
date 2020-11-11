@@ -12,7 +12,7 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 from ctypes import c_char, CDLL, c_void_p, c_long, c_int, cast, sizeof
 from ctypes import POINTER, c_char_p, c_ulong
 import sys

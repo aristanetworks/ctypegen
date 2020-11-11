@@ -12,9 +12,10 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
+from __future__ import absolute_import, division, print_function
+
 # We need to look inside ctypes a bit, so do this globally:
 # pylint: disable=protected-access
-
 import ctypes
 
 class TestableCtypeClass( object ):

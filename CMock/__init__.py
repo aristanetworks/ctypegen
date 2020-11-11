@@ -11,12 +11,14 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
+from __future__ import absolute_import, division, print_function
 
 import sys
 from ctypes import CDLL, CFUNCTYPE, c_void_p, cast
 import site
 import glob
 import libCTypeMock
+import _ctypes
 
 # We need to look inside ctypes a bit, so, pylint: disable=protected-access
 
@@ -47,6 +49,9 @@ class mocked( object ):
       check_ctypes_decorations( function )
       linkername = function.__name__
       callbackReturnType = None if method == PRE else function.restype
+
+      if callbackReturnType and issubclass( callbackReturnType, _ctypes._Pointer ):
+         callbackReturnType = c_void_p
       callbackType = CFUNCTYPE( callbackReturnType, *function.argtypes,
                                 use_errno=True )
       self.callback = callbackType( python )

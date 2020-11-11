@@ -317,8 +317,15 @@ attr_init( PyObject * object, PyObject * args, PyObject * kwds ) {
 static PyObject *
 make_attrnames() {
    auto namedict = PyDict_New();
-#define DWARF_ATTR( name, value )                                                   \
-   PyDict_SetItem( namedict, PyLong_FromLong( value ), makeString( #name ) );
+#define DWARF_ATTR( name, value ) \
+   { \
+      auto v = makeString( #name ); \
+      auto k = PyLong_FromLong( value ); \
+      PyDict_SetItem( namedict, k, v ); \
+      Py_DECREF( k ); \
+      Py_DECREF( v ); \
+   }
+
 #include <libpstack/dwarf/attr.h>
 #undef DWARF_ATTR
    return namedict;
@@ -327,8 +334,12 @@ make_attrnames() {
 static PyObject *
 make_attrvalues() {
    auto valuedict = PyDict_New();
-#define DWARF_ATTR( name, value )                                                   \
-   PyDict_SetItem( valuedict, makeString( #name ), PyLong_FromLong( value ) );
+#define DWARF_ATTR( name, value ) \
+   { \
+      auto val = PyLong_FromLong( value ); \
+      PyDict_SetItemString( valuedict, #name, val); \
+      Py_DECREF( val ); \
+   }
 #include <libpstack/dwarf/attr.h>
 #undef DWARF_ATTR
    return valuedict;
@@ -337,8 +348,14 @@ make_attrvalues() {
 static PyObject *
 make_tagnames() {
    auto namedict = PyDict_New();
-#define DWARF_TAG( name, value )                                                    \
-   PyDict_SetItem( namedict, PyLong_FromLong( value ), makeString( #name ) );
+#define DWARF_TAG( name, value ) \
+   { \
+      auto k = PyLong_FromLong( value ); \
+      auto v = makeString( #name ); \
+      PyDict_SetItem( namedict, k, v ); \
+      Py_DECREF( k ); \
+      Py_DECREF( v ); \
+   }
 #include <libpstack/dwarf/tags.h>
 #undef DWARF_TAG
    return namedict;

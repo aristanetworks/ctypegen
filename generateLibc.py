@@ -42,6 +42,12 @@ broken = set( [
       "stackblock",
       "timex",
       "_Unwind_Exception",
+      "__SOCKADDR_ARG", # "Transparent union" - gcc outputs no fields for it.
+      "__WAIT_STATUS", # "Transparent union" - gcc outputs no fields for it.
+      "wait3", # Takes transparent union, __WAIT_STATUS as arg.
+      "__wait3", # Takes transparent union, __WAIT_STATUS as arg.
+      "accept4", # Takes tranparent union, __SOCKADDR_ARG as arg.
+      "__recvfrom_chk", # Takes tranparent union, __SOCKADDR_ARG as arg.
 
        ] )
 
@@ -59,4 +65,4 @@ generate(
       [ "./libdbghelper.so", sys.argv[ 1 ] ],
       sys.argv[ 2 ],
       types=lambda name, space, die: name not in broken,
-      functions=lambda name, space, die: haveDyn( die ) )
+      functions=lambda name, space, die: name not in broken and haveDyn( die ) )

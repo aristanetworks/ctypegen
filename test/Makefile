@@ -31,8 +31,22 @@ libPreMockTest.so: PreMockTest.o PreMockTestExtern.o
 libChainTest.so: ChainTest.o ChainTestExtern.o
 	$(CXX) -shared -o $@ $^
 
+libFOpenTest.so: FOpenTest.o
+	$(CXX) -shared -o $@ $^
 
-check-bins: CTypeSanity MockTest libPreMockTest.so libChainTest.so
+libGreedyTest.so: GreedyTest.o
+	$(CXX) -shared -o $@ $^
+
+EnumTest.o: CXXFLAGS=-fshort-enums -fPIC -g
+libEnumTest.so: EnumTest.o
+	$(CXX) -shared -o $@ $^
+
+
+
+
+
+check-bins: CTypeSanity MockTest libPreMockTest.so libChainTest.so libFOpenTest.so \
+   		libGreedyTest.so libEnumTest.so
 
 check-ctypesanity: check-bins
 	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
@@ -46,9 +60,19 @@ check-pre-mock: check-bins
 check-chain: check-bins
 	$(PYTHON) ./ChainTest.py ./libChainTest.so
 
+check-greedy: check-bins
+	$(PYTHON) ./GreedyTestGen.py ./libGreedyTest.so
+
+check-enum: check-bins
+	$(PYTHON) ./EnumTest.py ./libEnumTest.so
 
 
-check: check-mock check-pre-mock check-ctypesanity check-chain
+
+check-pointers: check-bins
+	$(PYTHON) ./PointersTest.py ./libFOpenTest.so
+
+check: check-mock check-pre-mock check-ctypesanity check-chain  check-pointers \
+   	check-greedy check-enum
 
 clean:
 	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py

@@ -11,10 +11,10 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-from __future__ import print_function
 # CTypeGen generates boilerplate code using python's ctype package to
 # interact with C libraries. See Aid 3558, aka go/ctypegen for the gorey details.
 
+from __future__ import absolute_import, division, print_function
 import datetime
 import io
 import imp
@@ -32,7 +32,7 @@ attrs = libCTypeGen.attrs
 
 # python3 doesn't have basestring
 try:
-   baseString = basestring
+   baseString = basestring # pylint: disable=basestring-builtin
 except NameError:
    baseString = str
 

@@ -53,7 +53,6 @@ entry_g( int expect_return ) {
    assert( rc == expect_return );
 }
 
-
 int callCpp(int a, int b) {
    return A::Cpp::Namespace::withAFunction( a, b );
 }
