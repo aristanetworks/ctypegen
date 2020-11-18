@@ -301,6 +301,9 @@ class Member( object ):
       self.die = die
       self.allowUnalignedPtr = False
 
+   def __lt__( self, other ):
+      return self.name() < other.name() if isinstance( other, Member ) else False
+
    def setName( self, name ):
       self._name = name
 
@@ -521,7 +524,7 @@ class MemberType( Type ):
       out.write( u"]\n" )
       if self.anonMembers:
          out.write( u"%s._anonymous_ = (\n" % self.pyName() )
-         for field in self.anonMembers:
+         for field in sorted( self.anonMembers ):
             out.write( u"   \"%s\",\n" % field.pyName() )
          out.write( u"   )\n" )
       out.write( u"\n" )
@@ -1157,7 +1160,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          sys.stderr.write( "defining %d more types for deep inspection\n" %
                            len( indirectTypes ) )
          self.indirectTypes = set()
-         for t in indirectTypes:
+         for t in sorted( indirectTypes ):
             self.defineType( t, stream )
 
       # Now write out a class definition containing an entry for each global
