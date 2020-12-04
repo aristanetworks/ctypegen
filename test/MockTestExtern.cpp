@@ -32,7 +32,7 @@ extern "C" {
  */
 int
 f( int ival, const char * sval, int * ipval ) {
-   std::cout << "f(" << ival << ", " << sval << ", " << ipval << ")" << std::endl;
+   std::cout << "the real f(" << ival << ", " << sval << ", " << ipval << ")" << std::endl;
    *ipval = 2;
    return 1;
 }

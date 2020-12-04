@@ -114,11 +114,40 @@ protect( int perms, void * p, size_t len ) {
  * shared libraries that are not compiled as -fPIC
  */
 
-struct GOTMock {
-   PyObject_HEAD std::map< ElfW( Addr ), void * > replaced;
+template <typename M>
+void
+enableMock(M *m)
+{
+   if (++m->enableCount == 1)
+      m->enable();
+}
+
+template <typename M>
+void
+disableMock(M *m)
+{
+   if (--m->enableCount == 0)
+      m->disable();
+}
+
+struct Mock {
+   // clang-format off
+   PyObject_HEAD
+   // clang-format on
+   int enableCount;
+   Mock() : enableCount{ 0 } {}
+};
+
+class GOTMock : protected Mock {
+   friend void enableMock<GOTMock>(GOTMock *);
+   friend void disableMock<GOTMock>(GOTMock *);
+protected:
+   std::map< ElfW( Addr ), void * > replaced;
    void * callback;
+   void enable();
+   void disable();
+public:
    uintptr_t realaddr;
-   const char * function;
    GOTMock( const char * name_, void * callback_, void * handle_ );
    void processLibrary( const char *,
                         ElfW( Dyn ) * dynamic,
@@ -133,16 +162,16 @@ struct GOTMock {
                         const reltype * relocs,
                         size_t reloclen,
                         const ElfW( Sym ) * symbols,
+                        const char *function,
                         const char * strings );
-   void enable();
-   void disable();
 };
 
 extern char cmock_thunk_function[];
 extern char cmock_thunk_end[];
 
-struct PreMock : public GOTMock {
-   void enable();
+class PreMock : public GOTMock {
+   friend void enableMock<PreMock>(PreMock *);
+   friend void disableMock<PreMock>(PreMock *);
    void * callbackFor( void * got, void * func );
 
    // To deallocate our posix_memalign'ed data, we need to replace
@@ -154,8 +183,10 @@ struct PreMock : public GOTMock {
          free( p );
       }
    };
-
    std::map< void *, std::unique_ptr< void, RawFree > > thunks;
+protected:
+   void enable();
+public:
    PreMock( const char * name_, void * callback_, void * handle_ )
          : GOTMock( name_, callback_, handle_ ) {}
 };
@@ -167,10 +198,9 @@ struct PreMock : public GOTMock {
  * is not useful on x86-64 in the default compilation modek, as non-PIC code
  * can't be put in shared libraries.
  */
-struct StompMock {
-   // clang-format off
-   PyObject_HEAD
-   uintptr_t realaddr;
+class StompMock : protected Mock {
+   friend void enableMock<StompMock>(StompMock *);
+   friend void disableMock<StompMock>(StompMock *);
    static constexpr int savesize = __WORDSIZE == 32 ? 5 : 13;
 
    // the assembler to stomp over the function's prelude to enable the mock.
@@ -178,13 +208,15 @@ struct StompMock {
 
    // the original code that was contained in the bytes above.
    char disableCode[ savesize ];
-
    void * location; // the location in memory where we should do our stomping.
-   StompMock( const char * name, void * callback, void * handle );
-   void setState( bool );
+
+protected:
    void enable() { setState( true ); }
    void disable() { setState( false ); }
-   // clang-format on
+public:
+   uintptr_t realaddr;
+   StompMock( const char * name, void * callback, void * handle );
+   void setState( bool );
 };
 
 /*
@@ -192,10 +224,10 @@ struct StompMock {
  * Function is looked up with dlsym using handle (which can be RTLD_NEXT)
  */
 GOTMock::GOTMock( const char * name_, void * callback_, void * handle )
-      : callback( callback_ ), function( name_ ) {
+      : callback( callback_ ) {
    // Override function in all libraries.
    for ( auto map = _r_debug.r_map; map; map = map->l_next )
-      processLibrary( map->l_name, map->l_ld, map->l_addr, function );
+      processLibrary( map->l_name, map->l_ld, map->l_addr, name_ );
    realaddr = ( uintptr_t )dlsym( handle, name_ );
 }
 
@@ -210,6 +242,7 @@ GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
                          const reltype * relocs,
                          size_t reloclen,
                          const ElfW( Sym ) * symbols,
+                         const char *function,
                          const char * strings ) {
    for ( int i = 0;; ++i ) {
       if ( ( char * )( relocs + i ) >= ( char * )relocs + reloclen )
@@ -335,10 +368,10 @@ GOTMock::processLibrary( const char * libname,
 
    switch ( reltype ) {
     case DT_REL:
-      findGotEntries( loadaddr, relocs, reloclen, symbols, strings );
+      findGotEntries( loadaddr, relocs, reloclen, symbols, function, strings );
       break;
     case DT_RELA:
-      findGotEntries( loadaddr, relocas, reloclen, symbols, strings );
+      findGotEntries( loadaddr, relocas, reloclen, symbols, function, strings );
       break;
     default:
       break;
@@ -413,7 +446,7 @@ template< typename T >
 static PyObject *
 enableMock( PyObject * self, PyObject * args ) {
    auto * mock = reinterpret_cast< T * >( self );
-   mock->enable();
+   enableMock(mock);
    Py_RETURN_NONE;
 }
 
@@ -421,7 +454,7 @@ template< typename T >
 static PyObject *
 disableMock( PyObject * self, PyObject * args ) {
    auto * mock = reinterpret_cast< T * >( self );
-   mock->disable();
+   disableMock(mock);
    Py_RETURN_NONE;
 }
 
@@ -437,7 +470,7 @@ static void
 freeMock( PyObject * self ) {
    auto t = reinterpret_cast< T * >( self );
    auto typ = Py_TYPE( self );
-   t->disable();
+   disableMock(t);
    t->~T();
    typ->tp_free( t );
 }

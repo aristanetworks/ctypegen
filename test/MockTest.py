@@ -18,6 +18,7 @@ import sys
 import ctypes
 from CTypeGen import generate
 import CMock
+import gc
 
 if len( sys.argv ) >= 2:
    mocklib = sys.argv[ 1 ]
@@ -66,14 +67,30 @@ print( "checking we can disable the mock" )
 mockedF.disable()
 checkNotMocked()
 
-print( "check context manager" )
-with CMock.mocked( lib.f, pythonF ) as mock:
+print( "Check that disabling an already disabled context manager does not"
+      "interfere with another." )
+one = CMock.mocked( lib.f, pythonF )
+two = CMock.mocked( lib.f, pythonF )
+with two:
+   one.disable()
    checkMocked()
-   mock.disable()
+
+print( "Check context manager in a loop with GC" )
+for gcIters in range(4):
+   with CMock.mocked( lib.f, pythonF ) as mock:
+      # Invoke gc every second iteration - this tests that the garbage
+      # collection of a context manager created in a previous iteration of the
+      # loop does not interfere with the current context manager. (This is a
+      # special case of test above where we don't want an "old" mock to
+      # interfere with a live one when it's garbage collected)
+      if gcIters % 2 == 1:
+         gc.collect()
+      checkMocked()
+      mock.disable()
+      checkNotMocked()
+      mock.enable()
+      checkMocked()
    checkNotMocked()
-   mock.enable()
-   checkMocked()
-checkNotMocked()
 
 print( "check mocked member function" )
 # Uses the same logic as mockedF above - make sure we can call instance methods
