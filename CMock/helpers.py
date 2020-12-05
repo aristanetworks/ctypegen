@@ -89,7 +89,7 @@ def _decorateSyscalls( libc ):
       field.restype = res
       field.argtypes = args
 
-   from ctypes import c_int, c_void_p, POINTER, c_uint, c_long, c_ulong
+   from ctypes import c_int, c_void_p, POINTER, c_uint, c_long, c_ulong, c_char_p
    proto( c_int, libc.getsockopt,
           [ c_int, c_int, c_int, c_void_p, POINTER( c_uint ) ] )
    proto( c_int, libc.connect, [ c_int, c_void_p, c_uint ] )
@@ -102,6 +102,10 @@ def _decorateSyscalls( libc ):
    proto( c_int, libc.accept, [ c_int, c_void_p, POINTER( c_uint ) ] )
    proto( c_int, libc.ioctl, [ c_int, c_int, POINTER( c_long ) ] )
    proto( c_long, libc.send, [ c_int, c_void_p, c_ulong, c_int ] )
+   proto( c_long, libc.write, [ c_int, c_void_p, c_ulong ] )
+   proto( c_int, libc.getppid, [] )
+   proto( c_int, libc.listen, [ c_int, c_int ] )
+   proto( c_int, libc.open, [ c_char_p, c_int, c_int ] )
 
 def getLibc():
    ''' load and decorate libc functions. Returns reference to libc, and the
