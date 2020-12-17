@@ -1,0 +1,25 @@
+#!/usr/bin/env python
+import CTypeGen
+import sys
+import argparse
+
+
+def main():
+   modname = None
+   ap = argparse.ArgumentParser( description="Generate python from debug info"  )
+   ap.add_argument( "-i", "--input", metavar="shared library", type=str,
+                    nargs='+', help="libraries to process", required=True )
+   ap.add_argument( "-o", "--output", metavar="python output", type=str,
+                    help="libraries to process", required=True )
+   ap.add_argument( "-m", "--modname", metavar="module-name", type=str,
+                    help="name for python module", required=False )
+   res = ap.parse_args()
+   CTypeGen.generateAll( res.input, res.output, modname=res.modname )
+
+
+
+
+
+
+if __name__ == "__main__":
+   main()

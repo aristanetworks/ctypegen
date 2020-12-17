@@ -27,29 +27,31 @@ import sys
 # These don't render properly - packed structures, bitfield issues, etc.
 broken = set( [
 
-      "cached_data",
-      "DIR",
-      "__dirstream",
-      "epoll_data",
-      "epoll_event", # packed
-      "hashentry",
-      "in6addrinfo",
-      "_IO_FILE_complete",
-      "_IO_FILE_complete_plus",
-      "printf_info",
-      "printf_spec",
-      "pthread",
-      "stackblock",
-      "timex",
-      "_Unwind_Exception",
-      "__SOCKADDR_ARG", # "Transparent union" - gcc outputs no fields for it.
-      "__WAIT_STATUS", # "Transparent union" - gcc outputs no fields for it.
-      "wait3", # Takes transparent union, __WAIT_STATUS as arg.
-      "__wait3", # Takes transparent union, __WAIT_STATUS as arg.
-      "accept4", # Takes tranparent union, __SOCKADDR_ARG as arg.
-      "__recvfrom_chk", # Takes tranparent union, __SOCKADDR_ARG as arg.
+#      "cached_data",
+#      "DIR",
+#      "__dirstream",
+#      "epoll_data",
+#      "epoll_event", # packed
+#      "hashentry",
+#      "in6addrinfo",
+#      "_IO_FILE_complete",
+#      "_IO_FILE_complete_plus",
+#      "printf_info",
+#      "printf_spec",
+#      "pthread",
+#      "stackblock",
+#      "timex",
+#      "_Unwind_Exception",
 
        ] )
+
+
+#      "__SOCKADDR_ARG", # "Transparent union" - gcc outputs no fields for it.
+#      "__WAIT_STATUS", # "Transparent union" - gcc outputs no fields for it.
+#      "wait3", # Takes transparent union, __WAIT_STATUS as arg.
+#      "__wait3", # Takes transparent union, __WAIT_STATUS as arg.
+#      "accept4", # Takes tranparent union, __SOCKADDR_ARG as arg.
+#      "__recvfrom_chk", # Takes tranparent union, __SOCKADDR_ARG as arg.
 
 def haveDyn( die ):
    ''' Filter for functions that are in the .dynsym section - we can't call

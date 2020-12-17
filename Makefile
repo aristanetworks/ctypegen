@@ -16,12 +16,14 @@
 
 PYTHON ?= $(shell which python2)
 
-all:
-	env CFLAGS="-g -O0 --std=c++14" $(PYTHON) ./setup.py build
+all: build CMock/libc.py
+
+build:
+	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py build
 install:
-	env CFLAGS="-g -O0 --std=c++14" $(PYTHON) ./setup.py install
+	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
 test:
-	make -C test
+	env PYTHONPATH=$(PWD) make -C test
 
 dbghelper.o: CFLAGS=-O0 -g -fPIC
 libdbghelper.so: dbghelper.o
@@ -29,8 +31,9 @@ libdbghelper.so: dbghelper.o
 
 
 # Generate helpers for libc.
-libc.py: libdbghelper.so
-	$(PYTHON) ./generateLibc.py /lib*/libc.so.6 libc.py
+CMock/libc.py: libdbghelper.so
+	$(PYTHON) ./generateLibc.py /lib64/libc.so.6 $@ || \
+		echo "you can probably ignore errors above from generateLibc.py"
 clean:
 	rm -rf build __pycache__ core libc.py libdbghelper.so *.o
 	make -C test clean

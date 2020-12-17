@@ -3,3 +3,8 @@ CTypeSanity.py
 PreMockTest
 MockTest
 proggen.py
+EnumGenerated.py
+GreedyTest.py
+premock.py
+ptrgen.py
+chaintest.py

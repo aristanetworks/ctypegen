@@ -616,7 +616,7 @@ cmock_mangle( PyObject * self, PyObject * args ) {
 
    if ( gnu_hash != nullptr ) {
       // Walk .gnu_hash
-      for ( int bucket = 0; bucket < gnu_hash->nbuckets; ++bucket ) {
+      for ( uint32_t bucket = 0; bucket < gnu_hash->nbuckets; ++bucket ) {
          const uint32_t * bucketword = gnu_hash_bucket( gnu_hash, bucket );
          auto idx = *bucketword;
          if ( idx != 0 ) {
@@ -633,7 +633,7 @@ cmock_mangle( PyObject * self, PyObject * args ) {
       uint32_t nbuckets = hash[ 0 ];
       const uint32_t * buckets = hash + 2;
       const uint32_t * chains = buckets + nbuckets;
-      for ( int bucket = 0; bucket < nbuckets; ++bucket )
+      for ( uint32_t bucket = 0; bucket < nbuckets; ++bucket )
          for ( int idx = buckets[ bucket ]; idx != STN_UNDEF; idx = chains[ idx ] ) {
             auto & sym = symbols[ idx ];
             if ( sym.st_shndx != SHN_UNDEF )
