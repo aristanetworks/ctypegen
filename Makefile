@@ -14,7 +14,7 @@
 
 .PHONY: all test install clean
 
-PYTHON ?= $(shell which python2)
+PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
 
 all: build CMock/libc.py
 
@@ -32,7 +32,7 @@ libdbghelper.so: dbghelper.o
 
 # Generate helpers for libc.
 CMock/libc.py: libdbghelper.so
-	$(PYTHON) ./generateLibc.py /lib64/libc.so.6 $@ || \
+	env PYTHONPATH=$$PWD $(PYTHON) ./generateLibc.py /lib64/libc.so.6 $@ || \
 		echo "you can probably ignore errors above from generateLibc.py"
 clean:
 	rm -rf build __pycache__ core libc.py libdbghelper.so *.o

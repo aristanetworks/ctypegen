@@ -12,7 +12,7 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 #
-PYTHON ?= python2
+PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
 .PHONY: all check clean check-pre-mock check-mock check-ctypesanity
 
 CXXFLAGS += -g -fPIC

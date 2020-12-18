@@ -864,8 +864,8 @@ class Namespace( object ):
             return newtype
 
       self.types = TypesDict()
-      self.variables = defaultdict( lambda: None )
-      self.functions = defaultdict( lambda: None )
+      self.variables = {}
+      self.functions = {}
       self.subspaces = NamespaceDict( self )
       self.parent = parent
       self.name_ = name
@@ -1103,22 +1103,21 @@ class TypeResolver( object ):
 
       if tag == tags.DW_TAG_variable:
          if ( self.globalsFilter( name, namespace, die )
-              and namespace.variables[ name ] is None ):
+              and namespace.variables.get( name ) is None ):
             namespace.variables[ name ] = die
          return None
 
-      if tag == tags.DW_TAG_subprogram:
-         # ignore DIEs with a specification - we'll pick up the specification
-         # DIE instead.
-         if ( not die.DW_AT_specification
-                 # XXX : this breaks C++, but makes things very slow without it.
-                 and not die.DW_AT_declaration
-                 and self.functionsFilter( name, namespace, die )
-                 and namespace.functions[ name ] is None ):
-            namespace.functions[ name ] = die
+      # Only consider definitions, not declarations.
+      if die.DW_AT_declaration:
          return None
 
-      if die.DW_AT_declaration:
+      if tag == tags.DW_TAG_subprogram:
+         if (
+                  namespace.functions.get(name) is None
+                  and
+                 self.functionsFilter( name, namespace, die )
+                 ):
+            namespace.functions[ name ] = die
          return None
 
       if tag in TypeResolver.typeDieTags:
