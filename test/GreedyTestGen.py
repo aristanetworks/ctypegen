@@ -13,9 +13,10 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 from __future__ import absolute_import, division, print_function
-from ctypes import CDLL, POINTER
+from ctypes import CDLL, POINTER, byref
 import sys
-from CTypeGen import generate
+from CTypeGen import generateAll
+import CMock
 
 if len( sys.argv ) >= 2:
    sanitylib = sys.argv[ 1 ]
@@ -25,12 +26,7 @@ else:
 warnCount = 0
 warnings = []
 
-module, generator = generate(
-      sanitylib,
-      "GreedyTest.py",
-      types=lambda name, space, die: True,
-      functions=lambda name, space, die: True,
-      globalVars=lambda name, space, die: True )
+module, generator = generateAll( sanitylib, "GreedyTest.py" )
 
 dll = CDLL( sanitylib )
 module.decorateFunctions( dll )
@@ -43,3 +39,17 @@ assert isinstance( f[ 0 ].g, POINTER( module.g ) )
 assert f[ 0 ].g[ 0 ].inputx3 == 42 * 3
 assert f[ 0 ].g[ 0 ].inputx4 == 42 * 4
 assert module.Globals( dll ).global42.value == 42
+
+classWithMethods = module.LookInside_cn_cn_ClassWithMethods()
+classWithMethods.field1 = 42
+classWithMethods.field2 = 24
+func = CMock.mangleFunc( dll, "LookInside::ClassWithMethods::returnsPassedArgument" )
+assert func.argtypes is not None
+res = func( byref( classWithMethods ), 100 )
+assert res == 100
+
+func = CMock.mangleFunc( dll,
+      "LookInside::ClassWithMethods::addField1AndField2ToArgument" )
+assert func.argtypes is not None
+res = func( byref( classWithMethods ), 100 )
+assert res == 100 + 24 + 42

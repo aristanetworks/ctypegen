@@ -17,9 +17,11 @@
 from __future__ import absolute_import, division, print_function
 import datetime
 import io
+import os.path
 import imp
 import inspect
 import sys
+import ctypes
 import keyword
 from collections import defaultdict
 
@@ -495,38 +497,38 @@ class MemberType( Type ):
 
       # quoting the 'p' below stops pylint gagging on this file.
       if self.members:
-          out.write( u"%s._fields_ = [ # \x70ylint: disable=protected-access\n" %
-                self.pyName() )
-          for memnum, member in enumerate( self.members ):
-             # First make sure we actually have a proper definition of the type
-             # for this field. For example, clang++ will not generate the debug
-             # info for std::string by default, and we are left with an
-             # incomplete type for strings. ctypes has no way of directly
-             # controlling the offset for a field, so we need to give the field
-             # a type of the correct size, at least - if we don't find a
-             # definition for the field's type, then we just make it an array
-             # of characters of the appropriate size.
-             if not member.type().defined:
-                myOffset = member.die.DW_AT_data_member_location or 0
-                if memnum + 1 < len( self.members ):
-                   nextOffset = self.members[ memnum + 1 ].die. \
-                           DW_AT_data_member_location
-                   size = nextOffset - myOffset
-                else:
-                   size = self.die.DW_AT_byte_size - myOffset
-                typstr = "c_char * %d" % size
-                self.resolver.errorfunc(
-                      "padded %s:%s (no definition for %s)" % (
-                         self.name(), member.name(), member.type().name() ) )
+         out.write( u"%s._fields_ = [ # \x70ylint: disable=protected-access\n" %
+               self.pyName() )
+         for memnum, member in enumerate( self.members ):
+            # First make sure we actually have a proper definition of the type
+            # for this field. For example, clang++ will not generate the debug
+            # info for std::string by default, and we are left with an
+            # incomplete type for strings. ctypes has no way of directly
+            # controlling the offset for a field, so we need to give the field
+            # a type of the correct size, at least - if we don't find a
+            # definition for the field's type, then we just make it an array
+            # of characters of the appropriate size.
+            if not member.type().defined:
+               myOffset = member.die.DW_AT_data_member_location or 0
+               if memnum + 1 < len( self.members ):
+                  nextOffset = self.members[ memnum + 1 ].die. \
+                          DW_AT_data_member_location
+                  size = nextOffset - myOffset
+               else:
+                  size = self.die.DW_AT_byte_size - myOffset
+               typstr = "c_char * %d" % size
+               self.resolver.errorfunc(
+                     "padded %s:%s (no definition for %s)" % (
+                        self.name(), member.name(), member.type().name() ) )
 
-             else:
-                typstr = member.ctype()
-             if member.bit_size():
-                out.write( u"   ( \"%s\", %s, %d ),\n" %
-                      ( member.pyName(), typstr, member.bit_size() ) )
-             else:
-                out.write( u"   ( \"%s\", %s ),\n" % ( member.name(), typstr ) )
-          out.write( u"]\n" )
+            else:
+               typstr = member.ctype()
+            if member.bit_size():
+               out.write( u"   ( \"%s\", %s, %d ),\n" %
+                     ( member.pyName(), typstr, member.bit_size() ) )
+            else:
+               out.write( u"   ( \"%s\", %s ),\n" % ( member.name(), typstr ) )
+         out.write( u"]\n" )
       if self.anonMembers:
          out.write( u"%s._anonymous_ = (\n" % self.pyName() )
          for field in sorted( self.anonMembers ):
@@ -551,7 +553,6 @@ class StructType( MemberType ):
 
       memberCount = 0
       lastOffset = -1
-      bitfieldSize = 0
       for member in self.members:
          memberOffset = member.die.DW_AT_data_member_location
          # All members of a bitfield have the same member offset, and report
@@ -580,19 +581,19 @@ class UnionType( MemberType ):
 
    def define( self, out ):
       if not super( UnionType, self ).define( out ):
-          return False
-      if len(self.members) == 0 and self.die.DW_AT_byte_size != None:
-          out.write( u"%s._fields_ = [('__broken_transparent_union', c_void_p)]\n"
-                  % self.pyName() )
+         return False
+      if not self.members and self.die.DW_AT_byte_size is not None:
+         out.write( u"%s._fields_ = [('__broken_transparent_union', c_void_p)]\n"
+                 % self.pyName() )
       return True
-
-
-
 
 class EnumType( Type ):
    __slots__ = []
 
    def define( self, out ):
+      rtype = self.baseType()
+      if rtype:
+         self.resolver.defineType( rtype, out )
       indent = ''
       if self.spec and ( self.spec.nameless_enum is not None ):
          nameless = self.spec.nameless_enum
@@ -1112,11 +1113,8 @@ class TypeResolver( object ):
          return None
 
       if tag == tags.DW_TAG_subprogram:
-         if (
-                  namespace.functions.get(name) is None
-                  and
-                 self.functionsFilter( name, namespace, die )
-                 ):
+         if ( namespace.functions.get( name ) is None
+               and self.functionsFilter( name, namespace, die ) ):
             namespace.functions[ name ] = die
          return None
 
@@ -1290,6 +1288,20 @@ class PythonType( object ):
    def __hash__( self ):
       return hash( self.cName )
 
+
+def getlib( libname ):
+   if not os.path.exists( libname ):
+      # If the file doesn't exist, try and load the library with CDLL/dlopen
+      # And use the structure of the link map to work out the path to the file.
+      class LinkMap( ctypes.Structure ):
+         _fields_ = [
+               ( "addr", ctypes.c_void_p ),
+               ( "name", ctypes.c_char_p ),
+         ]
+      lib = ctypes.CDLL( libname )
+      libname = ctypes.cast( lib._handle, ctypes.POINTER( LinkMap ) )[0].name
+   return libCTypeGen.open( libname )
+
 def getDwarves( libnames ):
    # Allow libnames to be a single string, or list thereof.
    if isinstance( libnames, baseString ):
@@ -1297,13 +1309,12 @@ def getDwarves( libnames ):
    if not isinstance( libnames, list ) or not isinstance(
          libnames[ 0 ], baseString ):
       return None
-   return [ libCTypeGen.open( libname ) for libname in libnames ]
+   return [ getlib( libname ) for libname in libnames ]
 
 def generate( libnames, outname, types, functions, header=None, modname=None,
       existingTypes=None, errorfunc=None, globalVars=None, deepInspect=False,
       namelessEnums=False,
       namespaceFilter=lambda name, space, die: name in space.subspaces ):
-
    '''  External interface to generate code from a set of binaries, into a python
    module.
    Parameters:
@@ -1340,10 +1351,11 @@ def generateAll( libs, outname, modname=None ):
    ''' Simplified "generate" that will generate code for all types, functions,
    and variables in a library '''
    dwarves = getDwarves( libs )
+
    def allExterns( name, space, die ):
       name = die.DW_AT_linkage_name
-      if name == None:
-          name = die.name()
+      if name is None:
+         name = die.name()
       return any( [ name in dwarf.dynnames() for dwarf in dwarves ] )
    return generateDwarf( dwarves, outname, types=lambda x, y, z: True,
          functions=allExterns, globalVars=allExterns, modname=modname,

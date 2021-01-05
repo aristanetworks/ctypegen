@@ -429,8 +429,9 @@ static Dwarf::ImageCache imageCache;
 static PyObject *
 elf_open( PyObject * self, PyObject * args ) {
    try {
-      const char * image;
-      if ( !PyArg_ParseTuple( args, "s", &image ) )
+      const char *image;
+      Py_ssize_t imagelen;
+      if ( !PyArg_ParseTuple( args, "s#", &image, &imagelen ) )
          return nullptr;
       auto dwarf = imageCache.getDwarf( image );
       auto obj = dwarf->elf;

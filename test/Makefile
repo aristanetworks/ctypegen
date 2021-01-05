@@ -13,6 +13,7 @@
 #     limitations under the License.
 #
 PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
+PYTHONPATH ?= $(wildcard ../build/*lib*):..
 .PHONY: all check clean check-pre-mock check-mock check-ctypesanity
 
 CXXFLAGS += -g -fPIC
@@ -34,16 +35,12 @@ libChainTest.so: ChainTest.o ChainTestExtern.o
 libFOpenTest.so: FOpenTest.o
 	$(CXX) -shared -o $@ $^
 
-libGreedyTest.so: GreedyTest.o
+libGreedyTest.so: GreedyTest.o GreedyTestCpp.o
 	$(CXX) -shared -o $@ $^
 
 EnumTest.o: CXXFLAGS=-fshort-enums -fPIC -g
 libEnumTest.so: EnumTest.o
 	$(CXX) -shared -o $@ $^
-
-
-
-
 
 check-bins: CTypeSanity MockTest libPreMockTest.so libChainTest.so libFOpenTest.so \
    		libGreedyTest.so libEnumTest.so
@@ -65,8 +62,6 @@ check-greedy: check-bins
 
 check-enum: check-bins
 	$(PYTHON) ./EnumTest.py ./libEnumTest.so
-
-
 
 check-pointers: check-bins
 	$(PYTHON) ./PointersTest.py ./libFOpenTest.so

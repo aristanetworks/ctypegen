@@ -15,6 +15,7 @@
 .PHONY: all test install clean
 
 PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
+PYTHONPATH ?= $(PWD):$(wildcard $(PWD)/build/lib*)
 
 all: build CMock/libc.py
 
@@ -23,17 +24,17 @@ build:
 install:
 	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
 test:
-	env PYTHONPATH=$(PWD) make -C test
+	PYTHONPATH=$(PYTHONPATH) make -C test
 
 dbghelper.o: CFLAGS=-O0 -g -fPIC
 libdbghelper.so: dbghelper.o
 	$(CC) -g --shared -o $@ $^
 
-
 # Generate helpers for libc.
+# Try and force PYTHONPATH to load the just-built version of the C extensions.
 CMock/libc.py: libdbghelper.so
-	env PYTHONPATH=$$PWD $(PYTHON) ./generateLibc.py /lib64/libc.so.6 $@ || \
-		echo "you can probably ignore errors above from generateLibc.py"
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) ./generateLibc.py libc.so.6 $@
+
 clean:
 	rm -rf build __pycache__ core libc.py libdbghelper.so *.o
 	make -C test clean

@@ -433,10 +433,11 @@ newMock( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
    auto obj = reinterpret_cast< MockType * >( subtype->tp_alloc( subtype, 0 ) );
 
    const char * name;
+   Py_ssize_t namelen;
    long long callback;
    long long handle;
 
-   if ( !PyArg_ParseTuple( args, "sLL", &name, &callback, &handle ) )
+   if ( !PyArg_ParseTuple( args, "s#LL", &name, &namelen, &callback, &handle ) )
       return nullptr;
    new ( obj ) MockType( name, ( void * )callback, ( void * )handle );
    return reinterpret_cast< PyObject * >( obj );
@@ -514,7 +515,8 @@ cmock_mangle( PyObject * self, PyObject * args ) {
 
    const char * regexText;
    unsigned long int iHandle;
-   if ( !PyArg_ParseTuple( args, "ks", &iHandle, &regexText ) ) {
+   Py_ssize_t regexLen;
+   if ( !PyArg_ParseTuple( args, "ks#", &iHandle, &regexText, &regexLen ) ) {
       return nullptr;
    }
 

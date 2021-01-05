@@ -53,6 +53,7 @@ def hasPointers( t ):
    return rv
 
 errors = []
+
 def addError( text ):
    errors.append( text )
 
@@ -70,7 +71,7 @@ def checkUnalignedPtrs( t ):
       fname, ftype = fieldinfo[ 0 ], fieldinfo[ 1 ]
       alignment = ctypes.alignment( ftype )
       if alignment == 0:
-          continue
+         continue
       field = getattr( t, fname )
       if field.offset % alignment == 0:
          # This field is a aligned
