@@ -21,7 +21,7 @@ module, resolver = generate( mocklib,
                              [],
                              [ "fopen_test", ] )
 
-dll = ctypes.CDLL(mocklib)
+dll = ctypes.CDLL( mocklib )
 module.decorateFunctions( dll )
 
 # We'll mock fopen/fopen64 from libc.
@@ -46,4 +46,4 @@ def fopen64( name, mode ):
 # Verify that if we open /dev/null, the open gets redirected to /dev/zero,
 # and we read 100 bytes of nul chars, rather than no bytes (as we would
 # from /dev/null)
-dll.fopen_test(b"/dev/null", b"\0" * 100, 100)
+dll.fopen_test( b"/dev/null", b"\0" * 100, 100 )

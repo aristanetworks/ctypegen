@@ -1298,7 +1298,7 @@ def getlib( libname ):
                ( "name", ctypes.c_char_p ),
          ]
       lib = ctypes.CDLL( libname )
-      libname = ctypes.cast( lib._handle, ctypes.POINTER( LinkMap ) )[0].name
+      libname = ctypes.cast( lib._handle, ctypes.POINTER( LinkMap ) )[ 0 ].name
    return libCTypeGen.open( libname )
 
 def getDwarves( libnames ):

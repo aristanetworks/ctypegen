@@ -76,7 +76,7 @@ with two:
    checkMocked()
 
 print( "Check context manager in a loop with GC" )
-for gcIters in range(4):
+for gcIters in range( 4 ):
    with CMock.mocked( lib.f, pythonF ) as mock:
       # Invoke gc every second iteration - this tests that the garbage
       # collection of a context manager created in a previous iteration of the

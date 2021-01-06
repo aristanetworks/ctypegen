@@ -15,15 +15,16 @@
 */
 #include <iostream>
 
-
-
-namespace A { namespace Cpp { namespace Namespace {
-int withAFunction(int a, int b) {
+namespace A {
+namespace Cpp {
+namespace Namespace {
+int
+withAFunction( int a, int b ) {
    return a * b;
 }
-} } }
-
-
+} // namespace Namespace
+} // namespace Cpp
+} // namespace A
 
 extern "C" {
 /*
@@ -32,7 +33,8 @@ extern "C" {
  */
 int
 f( int ival, const char * sval, int * ipval ) {
-   std::cout << "the real f(" << ival << ", " << sval << ", " << ipval << ")" << std::endl;
+   std::cout << "the real f(" << ival << ", " << sval << ", " << ipval << ")"
+             << std::endl;
    *ipval = 2;
    return 1;
 }
@@ -42,5 +44,4 @@ g( int ival, const char * sval ) {
    std::cout << "this is the real g " << ival << "/" << sval << "\n";
    return 42;
 }
-
 }

@@ -58,6 +58,7 @@ assert res == 100 + 24 + 42
 debug = libCTypeGen.open( sanitylib )
 
 die = None
+
 def findDIE( die, name ):
    if die.name() == name:
       return die

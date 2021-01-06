@@ -302,14 +302,16 @@ makeString( const std::string & s ) {
 }
 
 /* Get a reference to python's true or false values. */
-static PyObject *pythonBool( bool cbool ) {
+static PyObject *
+pythonBool( bool cbool ) {
    PyObject * pybool = cbool ? Py_True : Py_False;
    Py_INCREF( pybool );
    return pybool;
 };
 
 /* Implement a basic "rich compare" given a long difference between two values */
-static PyObject *richCompare( long diff, int op ) {
+static PyObject *
+richCompare( long diff, int op ) {
    switch ( op ) {
     case Py_EQ:
       return pythonBool( diff == 0 );
@@ -345,13 +347,13 @@ attr_init( PyObject * object, PyObject * args, PyObject * kwds ) {
 static PyObject *
 make_attrnames() {
    auto namedict = PyDict_New();
-#define DWARF_ATTR( name, value ) \
-   { \
-      auto v = makeString( #name ); \
-      auto k = PyLong_FromLong( value ); \
-      PyDict_SetItem( namedict, k, v ); \
-      Py_DECREF( k ); \
-      Py_DECREF( v ); \
+#define DWARF_ATTR( name, value )                                                   \
+   {                                                                                \
+      auto v = makeString( #name );                                                 \
+      auto k = PyLong_FromLong( value );                                            \
+      PyDict_SetItem( namedict, k, v );                                             \
+      Py_DECREF( k );                                                               \
+      Py_DECREF( v );                                                               \
    }
 
 #include <libpstack/dwarf/attr.h>
@@ -362,11 +364,11 @@ make_attrnames() {
 static PyObject *
 make_attrvalues() {
    auto valuedict = PyDict_New();
-#define DWARF_ATTR( name, value ) \
-   { \
-      auto val = PyLong_FromLong( value ); \
-      PyDict_SetItemString( valuedict, #name, val); \
-      Py_DECREF( val ); \
+#define DWARF_ATTR( name, value )                                                   \
+   {                                                                                \
+      auto val = PyLong_FromLong( value );                                          \
+      PyDict_SetItemString( valuedict, #name, val );                                \
+      Py_DECREF( val );                                                             \
    }
 #include <libpstack/dwarf/attr.h>
 #undef DWARF_ATTR
@@ -376,13 +378,13 @@ make_attrvalues() {
 static PyObject *
 make_tagnames() {
    auto namedict = PyDict_New();
-#define DWARF_TAG( name, value ) \
-   { \
-      auto k = PyLong_FromLong( value ); \
-      auto v = makeString( #name ); \
-      PyDict_SetItem( namedict, k, v ); \
-      Py_DECREF( k ); \
-      Py_DECREF( v ); \
+#define DWARF_TAG( name, value )                                                    \
+   {                                                                                \
+      auto k = PyLong_FromLong( value );                                            \
+      auto v = makeString( #name );                                                 \
+      PyDict_SetItem( namedict, k, v );                                             \
+      Py_DECREF( k );                                                               \
+      Py_DECREF( v );                                                               \
    }
 #include <libpstack/dwarf/tags.h>
 #undef DWARF_TAG
@@ -473,7 +475,7 @@ static Dwarf::ImageCache imageCache;
 static PyObject *
 elf_open( PyObject * self, PyObject * args ) {
    try {
-      const char *image;
+      const char * image;
       Py_ssize_t imagelen;
       if ( !PyArg_ParseTuple( args, "s#", &image, &imagelen ) )
          return nullptr;
@@ -971,8 +973,10 @@ static PyMethodDef entry_methods[] = {
      "get full name of a DIE (as tuple, with entry for each namesace)" },
    { "object", entry_object, METH_VARARGS, "get ELF object associated with DIE" },
    { "unit", entry_unit, METH_VARARGS, "get DWARF unit associated with DIE" },
-   { "parent", entry_parent, METH_VARARGS,
-               "get a DIE's parent DIE (or None for root of unit)" },
+   { "parent",
+     entry_parent,
+     METH_VARARGS,
+     "get a DIE's parent DIE (or None for root of unit)" },
    { 0, 0, 0, 0 }
 };
 

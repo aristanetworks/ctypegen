@@ -114,39 +114,39 @@ protect( int perms, void * p, size_t len ) {
  * shared libraries that are not compiled as -fPIC
  */
 
-template <typename M>
+template< typename M >
 void
-enableMock(M *m)
-{
-   if (++m->enableCount == 1)
+enableMock( M * m ) {
+   if ( ++m->enableCount == 1 )
       m->enable();
 }
 
-template <typename M>
+template< typename M >
 void
-disableMock(M *m)
-{
-   if (--m->enableCount == 0)
+disableMock( M * m ) {
+   if ( --m->enableCount == 0 )
       m->disable();
 }
 
 struct Mock {
    // clang-format off
    PyObject_HEAD
-   // clang-format on
    int enableCount;
+   // clang-format on
    Mock() : enableCount{ 0 } {}
 };
 
 class GOTMock : protected Mock {
-   friend void enableMock<GOTMock>(GOTMock *);
-   friend void disableMock<GOTMock>(GOTMock *);
-protected:
+   friend void enableMock< GOTMock >( GOTMock * );
+   friend void disableMock< GOTMock >( GOTMock * );
+
+ protected:
    std::map< ElfW( Addr ), void * > replaced;
    void * callback;
    void enable();
    void disable();
-public:
+
+ public:
    uintptr_t realaddr;
    GOTMock( const char * name_, void * callback_, void * handle_ );
    void processLibrary( const char *,
@@ -162,7 +162,7 @@ public:
                         const reltype * relocs,
                         size_t reloclen,
                         const ElfW( Sym ) * symbols,
-                        const char *function,
+                        const char * function,
                         const char * strings );
 };
 
@@ -170,8 +170,8 @@ extern char cmock_thunk_function[];
 extern char cmock_thunk_end[];
 
 class PreMock : public GOTMock {
-   friend void enableMock<PreMock>(PreMock *);
-   friend void disableMock<PreMock>(PreMock *);
+   friend void enableMock< PreMock >( PreMock * );
+   friend void disableMock< PreMock >( PreMock * );
    void * callbackFor( void * got, void * func );
 
    // To deallocate our posix_memalign'ed data, we need to replace
@@ -184,9 +184,11 @@ class PreMock : public GOTMock {
       }
    };
    std::map< void *, std::unique_ptr< void, RawFree > > thunks;
-protected:
+
+ protected:
    void enable();
-public:
+
+ public:
    PreMock( const char * name_, void * callback_, void * handle_ )
          : GOTMock( name_, callback_, handle_ ) {}
 };
@@ -199,8 +201,8 @@ public:
  * can't be put in shared libraries.
  */
 class StompMock : protected Mock {
-   friend void enableMock<StompMock>(StompMock *);
-   friend void disableMock<StompMock>(StompMock *);
+   friend void enableMock< StompMock >( StompMock * );
+   friend void disableMock< StompMock >( StompMock * );
    static constexpr int savesize = __WORDSIZE == 32 ? 5 : 13;
 
    // the assembler to stomp over the function's prelude to enable the mock.
@@ -210,10 +212,11 @@ class StompMock : protected Mock {
    char disableCode[ savesize ];
    void * location; // the location in memory where we should do our stomping.
 
-protected:
+ protected:
    void enable() { setState( true ); }
    void disable() { setState( false ); }
-public:
+
+ public:
    uintptr_t realaddr;
    StompMock( const char * name, void * callback, void * handle );
    void setState( bool );
@@ -242,7 +245,7 @@ GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
                          const reltype * relocs,
                          size_t reloclen,
                          const ElfW( Sym ) * symbols,
-                         const char *function,
+                         const char * function,
                          const char * strings ) {
    for ( int i = 0;; ++i ) {
       if ( ( char * )( relocs + i ) >= ( char * )relocs + reloclen )
@@ -447,7 +450,7 @@ template< typename T >
 static PyObject *
 enableMock( PyObject * self, PyObject * args ) {
    auto * mock = reinterpret_cast< T * >( self );
-   enableMock(mock);
+   enableMock( mock );
    Py_RETURN_NONE;
 }
 
@@ -455,7 +458,7 @@ template< typename T >
 static PyObject *
 disableMock( PyObject * self, PyObject * args ) {
    auto * mock = reinterpret_cast< T * >( self );
-   disableMock(mock);
+   disableMock( mock );
    Py_RETURN_NONE;
 }
 
@@ -471,7 +474,7 @@ static void
 freeMock( PyObject * self ) {
    auto t = reinterpret_cast< T * >( self );
    auto typ = Py_TYPE( self );
-   disableMock(t);
+   disableMock( t );
    t->~T();
    typ->tp_free( t );
 }
@@ -595,7 +598,7 @@ cmock_mangle( PyObject * self, PyObject * args ) {
    // about. (And, in reality, the symbol indexes are ordered, so the accesses
    // are actually contiguous anyhow.
 
-   auto processSymbol = [&]( const Elf_Sym & sym ) {
+   auto processSymbol = [ & ]( const Elf_Sym & sym ) {
       auto tuple = PyTuple_New( 2 );
 
       assert( sym.st_shndx != SHN_UNDEF );

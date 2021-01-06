@@ -42,7 +42,7 @@ def setErrnoAndReturnFn( error, rv=-1 ):
    def call( rv, error, *args ):
       ctypes.set_errno( error )
       return rv
-   return lambda *args : call(rv, error, *args)
+   return lambda *args: call( rv, error, *args )
 
 class FakeSyscall( CMock.mocked ):
    ''' Allows calling a "fake" system call. The first "start" invocations will
@@ -78,7 +78,6 @@ class FakeFdSyscall( FakeSyscall ):
       if self.onFd == fd or self.onFd is None:
          return super( FakeFdSyscall, self ).__call__( fd, *args )
       return self.realfunc( fd, *args )
-
 
 def _decorateSyscalls( libc ):
    ''' Decorate libc system calls with type information.  We do this manually,

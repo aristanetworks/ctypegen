@@ -23,13 +23,11 @@ pipe = subprocess.Popen( [ "uname", "-m" ], stdout=subprocess.PIPE )
 ( out, err ) = pipe.communicate()
 arch = str( out.decode( "utf-8" ) ).strip()
 if arch == "i686":
-    arch = "i386"
-
+   arch = "i386"
 
 text = ""
 
 unixccompiler.UnixCCompiler.src_extensions += [ ".s" ]
-
 
 pstack_base = os.getenv( "PSTACK_BASE" )
 if pstack_base is None:
