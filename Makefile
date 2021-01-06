@@ -12,14 +12,14 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-.PHONY: all test install clean
+.PHONY: all test install clean build-all
 
 PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
-PYTHONPATH ?= $(PWD):$(wildcard $(PWD)/build/lib*)
+PYTHONPATH = $(PWD):$(wildcard $(PWD)/build/lib*)
 
-all: build CMock/libc.py
+all: build-all CMock/libc.py
 
-build:
+build-all:
 	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py build
 install:
 	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
