@@ -78,9 +78,11 @@ recursionDepth = 56
 @CMock.Mock( lib.preRecurse, method=CMock.PRE )
 def mockedRecurse( ival ):
    global recursionDepth
-   print( "recursion depth now %d" % ival )
+   sys.stdout.write( "%d, " % ival )
    assert recursionDepth == ival
    recursionDepth -= 1
 
+sys.stdout.write( "recursion depth: " )
 lib.preRecurseEntry( recursionDepth )
+print( "done" )
 assert recursionDepth == 0

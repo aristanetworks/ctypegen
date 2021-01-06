@@ -1288,7 +1288,6 @@ class PythonType( object ):
    def __hash__( self ):
       return hash( self.cName )
 
-
 def getlib( libname ):
    if not os.path.exists( libname ):
       # If the file doesn't exist, try and load the library with CDLL/dlopen

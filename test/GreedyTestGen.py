@@ -17,6 +17,7 @@ from ctypes import CDLL, POINTER, byref
 import sys
 from CTypeGen import generateAll
 import CMock
+import libCTypeGen
 
 if len( sys.argv ) >= 2:
    sanitylib = sys.argv[ 1 ]
@@ -53,3 +54,34 @@ func = CMock.mangleFunc( dll,
 assert func.argtypes is not None
 res = func( byref( classWithMethods ), 100 )
 assert res == 100 + 24 + 42
+
+debug = libCTypeGen.open( sanitylib )
+
+die = None
+def findDIE( die, name ):
+   if die.name() == name:
+      return die
+   for c in die:
+      f = findDIE( c, name )
+      if f:
+         return f
+   return None
+
+u = None
+for u in debug.units():
+   die = findDIE( u.root(), "returnsPassedArgument" )
+   if die:
+      break
+assert die is not None
+die = die.parent()
+assert die.name() == "ClassWithMethods"
+die = die.parent()
+assert die.name() == "LookInside"
+die = die.parent()
+assert die.tag() == libCTypeGen.tags.DW_TAG_compile_unit
+shouldBeNone = die.parent()
+assert shouldBeNone is None
+
+# die.unit() should compare equal to u, but is not the same instance.
+assert u == die.unit()
+assert u is not die.unit()

@@ -301,6 +301,34 @@ makeString( const std::string & s ) {
    return PyUnicode_FromString( s.c_str() );
 }
 
+/* Get a reference to python's true or false values. */
+static PyObject *pythonBool( bool cbool ) {
+   PyObject * pybool = cbool ? Py_True : Py_False;
+   Py_INCREF( pybool );
+   return pybool;
+};
+
+/* Implement a basic "rich compare" given a long difference between two values */
+static PyObject *richCompare( long diff, int op ) {
+   switch ( op ) {
+    case Py_EQ:
+      return pythonBool( diff == 0 );
+    case Py_NE:
+      return pythonBool( diff != 0 );
+    case Py_GT:
+      return pythonBool( diff > 0 );
+    case Py_GE:
+      return pythonBool( diff >= 0 );
+    case Py_LT:
+      return pythonBool( diff < 0 );
+    case Py_LE:
+      return pythonBool( diff <= 0 );
+    default:
+      Py_INCREF( Py_NotImplemented );
+      return Py_NotImplemented;
+   }
+}
+
 } // namespace
 
 extern "C" {
@@ -375,6 +403,22 @@ makeUnit( const Dwarf::Unit::sptr & unit ) {
    PyDwarfUnit * value = PyObject_New( PyDwarfUnit, &unitType );
    new ( &value->unit ) Dwarf::Unit::sptr( unit );
    return ( PyObject * )value;
+}
+
+static PyObject *
+unit_compare( PyObject * lhso, PyObject * rhso, int op ) {
+   if ( Py_TYPE( rhso ) != &unitType ) {
+      Py_INCREF( Py_NotImplemented );
+      return Py_NotImplemented;
+   }
+
+   auto * lhs = ( PyDwarfUnit * )lhso;
+   auto * rhs = ( PyDwarfUnit * )rhso;
+
+   auto diff = lhs->unit->dwarf->elf.get() - rhs->unit->dwarf->elf.get();
+   if ( !diff )
+      diff = lhs->unit->offset - rhs->unit->offset;
+   return richCompare( diff, op );
 }
 
 static void
@@ -572,6 +616,22 @@ entry_object( PyObject * self, PyObject * args ) {
    return ( PyObject * )pyelf;
 }
 
+static PyObject *
+entry_unit( PyObject * self, PyObject * args ) {
+   PyDwarfEntry * ent = ( PyDwarfEntry * )self;
+   return makeUnit( ent->die.getUnit() );
+}
+
+static PyObject *
+entry_parent( PyObject * self, PyObject * args ) {
+   PyDwarfEntry * ent = ( PyDwarfEntry * )self;
+   if ( ent->die.getParentOffset() != 0 ) {
+      auto parent = ent->die.getUnit()->offsetToDIE( ent->die.getParentOffset() );
+      return makeEntry( parent );
+   }
+   Py_RETURN_NONE;
+}
+
 /*
  * DIEs have offsets within their unit, and the units have offsets within the
  * DWARF section they are defined in.
@@ -580,9 +640,9 @@ entry_object( PyObject * self, PyObject * args ) {
  */
 static PyObject *
 entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
-   if ( Py_TYPE( rhso ) != &dwarfEntryType ) {
-      Py_INCREF( Py_False );
-      return Py_False;
+   if ( Py_TYPE( rhso ) != &dwarfEntryType || Py_TYPE( lhso ) != &dwarfEntryType ) {
+      Py_INCREF( Py_NotImplemented );
+      return Py_NotImplemented;
    }
 
    PyDwarfEntry * lhs = ( PyDwarfEntry * )lhso;
@@ -591,33 +651,7 @@ entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
    size_t diff = lhs->die.getUnit()->offset - rhs->die.getUnit()->offset;
    if ( diff == 0 )
       diff = lhs->die.getOffset() - rhs->die.getOffset();
-
-   auto pythonBool = []( bool cbool ) {
-      PyObject * pybool = cbool ? Py_True : Py_False;
-      Py_INCREF( pybool );
-      return pybool;
-   };
-
-   if ( Py_TYPE( rhs ) == Py_TYPE( lhs ) ) {
-      switch ( op ) {
-       case Py_EQ:
-         return pythonBool( diff == 0 );
-       case Py_NE:
-         return pythonBool( diff != 0 );
-       case Py_GT:
-         return pythonBool( diff > 0 );
-       case Py_GE:
-         return pythonBool( diff >= 0 );
-       case Py_LT:
-         return pythonBool( diff < 0 );
-       case Py_LE:
-         return pythonBool( diff <= 0 );
-       default:
-         break;
-      }
-   }
-   Py_INCREF( Py_NotImplemented );
-   return Py_NotImplemented;
+   return richCompare( op, diff );
 }
 
 #if PY_MAJOR_VERSION >= 3
@@ -936,6 +970,9 @@ static PyMethodDef entry_methods[] = {
      METH_VARARGS,
      "get full name of a DIE (as tuple, with entry for each namesace)" },
    { "object", entry_object, METH_VARARGS, "get ELF object associated with DIE" },
+   { "unit", entry_unit, METH_VARARGS, "get DWARF unit associated with DIE" },
+   { "parent", entry_parent, METH_VARARGS,
+               "get a DIE's parent DIE (or None for root of unit)" },
    { 0, 0, 0, 0 }
 };
 
@@ -1035,6 +1072,7 @@ initlibCTypeGen( void )
    unitType.tp_dealloc = unit_free;
    unitType.tp_new = PyType_GenericNew;
    unitType.tp_methods = unit_methods;
+   unitType.tp_richcompare = unit_compare;
 
    dwarfEntryIteratorType.tp_name = "libCTypeGen.DwarfEntryIterator";
    dwarfEntryIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;
