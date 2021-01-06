@@ -59,13 +59,13 @@ debug = libCTypeGen.open( sanitylib )
 
 die = None
 
-def findDIE( die, name ):
-   if die.name() == name:
-      return die
-   for c in die:
-      f = findDIE( c, name )
-      if f:
-         return f
+def findDIE( d, name ):
+   if d.name() == name:
+      return d
+   for c in d:
+      found = findDIE( c, name )
+      if found:
+         return found
    return None
 
 u = None

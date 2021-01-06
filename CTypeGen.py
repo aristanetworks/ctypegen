@@ -1298,7 +1298,8 @@ def getlib( libname ):
                ( "name", ctypes.c_char_p ),
          ]
       lib = ctypes.CDLL( libname )
-      libname = ctypes.cast( lib._handle, ctypes.POINTER( LinkMap ) )[ 0 ].name
+      handle = lib._handle # pylint: disable=protected-access
+      libname = ctypes.cast( handle, ctypes.POINTER( LinkMap ) )[ 0 ].name
    return libCTypeGen.open( libname )
 
 def getDwarves( libnames ):
