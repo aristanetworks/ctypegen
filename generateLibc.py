@@ -63,4 +63,6 @@ generate(
       [ "./libdbghelper.so", sys.argv[ 1 ] ],
       sys.argv[ 2 ],
       types=lambda name, space, die: name not in broken,
-      functions=lambda name, space, die: name not in broken and haveDyn( die ) )
+      functions=lambda name, space, die: name not in broken and haveDyn( die ),
+      macroFiles='dbghelper.c',
+      )

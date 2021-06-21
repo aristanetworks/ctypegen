@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sstream>
 #include <stdio.h>
+#include "macrosanity.h"
 
 /*
  * This test helper defines a C structure, a function to create a  populated
@@ -194,19 +195,26 @@ operator<<( std::ostream & os, const Baz & baz ) {
 
 std::ostream &
 operator<<( std::ostream & os, const Foo & foo ) {
-   return os << "{\n\t" << FIELD( foo, anInt ) << ",\n\t" << FIELD( foo, aChar )
-             << ",\n\t" << FIELD( foo, aLong ) << ",\n\t" << FIELD( foo, aBool )
-             << ",\n\t" << FIELD( foo, aDouble ) << ",\n\t"
-             << STRFIELD( foo, aOneDimensionalArrayOfChar ) << ",\n\t"
-             << FIELD( foo, aNestedStructure ) << ",\n\t"
-             << FIELD( foo, aNestedStructurePointer ) << ",\n\t"
-             << FIELD( foo, aNestedUnion ) << ",\n\t" << FIELD( foo, anIntPtr )
-             << ",\n\t" << FIELD( foo, aSizeT ) << ",\n\t" << FIELD( foo, bigEnum )
-             << ",\n\t" << FIELD( foo, anEnum ) << ",\n\t"
-             << FIELD( foo, aCString )
-             // << ",\n\t" << FIELD( foo, aFuncPtr ) - we don't output this.
-             << ",\n\t" << FIELD( foo, aBitFieldPart1 ) << ",\n\t"
-             << FIELD( foo, aBitFieldPart2 ) << "\n}";
+   return os << "{\n\t" << FIELD( foo, anInt )
+             << ",\n\t" << FIELD( foo, aChar )
+             << ",\n\t" << FIELD( foo, aLong )
+             << ",\n\t" << FIELD( foo, aBool )
+             << ",\n\t" << FIELD( foo, aDouble )
+             << ",\n\t" << STRFIELD( foo, aOneDimensionalArrayOfChar )
+             << ",\n\t" << FIELD( foo, aNestedStructure )
+             << ",\n\t" << FIELD( foo, aNestedStructurePointer )
+             << ",\n\t" << FIELD( foo, aNestedUnion )
+             << ",\n\t" << FIELD( foo, anIntPtr )
+             << ",\n\t" << FIELD( foo, aSizeT )
+             << ",\n\t" << FIELD( foo, bigEnum )
+             << ",\n\t" << FIELD( foo, anEnum )
+             << ",\n\t" << FIELD( foo, aCString )
+             << ",\n\t" << FIELD( foo, aBitFieldPart1 )
+             << ",\n\t" << FIELD( foo, aBitFieldPart2 )
+             << ",\n\t" << FIELD( foo, aBitFieldPart3 )
+             << ",\n\t" << FIELD( foo, aBitFieldPart4 )
+             << ",\n\t" << FIELD( foo, aBitFieldPart5 )
+             << "\n}";
 }
 
 extern "C" {
@@ -236,8 +244,10 @@ make_foo() {
    aFoo.aCString = "hello world";
    aFoo.aFuncPtr = bytwo;
    aFoo.aBitFieldPart1 = 100;
-   aFoo.aBitFieldPart2 = 200;
-   aFoo.aBitFieldPart2 = 200;
+   aFoo.aBitFieldPart2 = 10;
+   aFoo.aBitFieldPart3 = 20;
+   aFoo.aBitFieldPart4 = 30;
+   aFoo.aBitFieldPart5 = 40;
    strcpy( aFoo.aOneDimensionalArrayOfChar, "hello world" );
    return aFoop;
 }

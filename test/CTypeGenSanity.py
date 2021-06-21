@@ -76,7 +76,9 @@ module, generator = generate(
       types,
       functions,
       errorfunc=testwarning,
-      globalVars=globalVars )
+      globalVars=globalVars,
+      macroFiles=[ "macrosanity.h" ]
+      )
 
 assert warnCount == 1
 assert "requires a list of ELF images" in warnings[ 0 ]
@@ -89,7 +91,9 @@ module, generator = generate(
       types,
       functions,
       errorfunc=testwarning,
-      globalVars=globalVars )
+      globalVars=globalVars,
+      macroFiles=[ "macrosanity.h" ]
+      )
 
 # under "clang" we generate a warning because we cannot completely define
 # the content of std::string
@@ -131,6 +135,12 @@ bytwo = theCTypes.contents.aFuncPtr( 4 )
 assert bytwo == 8
 assert module.TheEnum.One == 1
 assert module.TheEnum.Two == 2
+
+print( "Checking macros" )
+assert module.A == 42
+assert module.B == module.A + 32
+assert module.C == module.B + 32
+assert module.HELLO == 'hello world'
 
 print( "Make sure 64-bit values are generated properly." )
 assert theCTypes.contents.bigEnum.value == module.BigNum.Big

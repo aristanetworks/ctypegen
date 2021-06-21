@@ -463,6 +463,67 @@ unit_root( PyObject * self, PyObject * args ) {
    return makeEntry( unit->unit->root() );
 }
 
+struct PythonMacros : public Dwarf::MacroVisitor {
+   Dwarf::Unit::csptr unit;
+   PyObject *callback;
+   PythonMacros(const Dwarf::Unit::csptr &unit_, PyObject *callback_) :
+      unit { unit_ }, callback { callback_ } {}
+
+   bool define( int line, const std::string &definition ) override {
+      PyObject *o = PyObject_CallMethod( callback, (char *)"define", (char *)"is",
+                                         line, definition.c_str() );
+      if ( !o )
+         return false;
+      Py_DECREF( o );
+      return true;
+   }
+
+   bool undef( int line, const std::string &definition ) override {
+      PyObject *o = PyObject_CallMethod( callback, (char *)"undef",
+                                         (char *)"is", line, definition.c_str() );
+      if ( !o )
+         return false;
+      Py_DECREF( o );
+      return true;
+   }
+
+   bool startFile( int line, const std::string &dir, const Dwarf::FileEntry &ent )
+                   override {
+      PyObject *o = PyObject_CallMethod( callback, (char *)"startFile",
+                                         (char *)"iss", line, dir.c_str(),
+                                         ent.name.c_str() );
+      if ( !o )
+         return false;
+      Py_DECREF( o );
+      return true;
+   }
+
+   bool endFile() override {
+      PyObject *o = PyObject_CallMethod( callback, (char *)"endFile", NULL );
+      if ( !o )
+         return false;
+      Py_DECREF( o );
+      return true;
+   }
+};
+
+static PyObject *
+unit_macros( PyObject * self, PyObject * args ) {
+   auto unit = ( ( PyDwarfUnit * )self )->unit;
+
+   PyObject *callback;
+   if ( !PyArg_ParseTuple( args, "O", &callback ) )
+      return nullptr;
+
+   const Dwarf::Macros *macros = unit->getMacros();
+   if ( macros != nullptr ) {
+      PythonMacros visitor( unit, callback );
+      if ( !macros->visit( unit->dwarf, &visitor ) )
+         return nullptr;
+   }
+   Py_RETURN_NONE;
+}
+
 static PyObject *
 unit_purge( PyObject * self, PyObject * args ) {
    PyDwarfUnit * unit = ( PyDwarfUnit * )self;
@@ -964,6 +1025,7 @@ static PyMethodDef unit_methods[] = {
    { "root", unit_root, METH_VARARGS, "get root DIE of a unit" },
    { "purge", unit_purge, METH_VARARGS, "purge any memory used by DIE trees" },
    { "dieCount", unit_dieCount, METH_VARARGS, "get total number of DIEs in unit" },
+   { "macros", unit_macros, METH_VARARGS, "walk the macros for a unit" },
    { 0, 0, 0, 0 }
 };
 

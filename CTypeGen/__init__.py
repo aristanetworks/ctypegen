@@ -25,6 +25,8 @@ import ctypes
 import keyword
 from collections import defaultdict
 
+import CTypeGen.expression
+
 # the following modules are dynamically generated inside the C extension.
 # pylint should ignore them
 import libCTypeGen # pylint: disable=import-error
@@ -1375,7 +1377,8 @@ def getDwarves( libnames ):
 def generate( libnames, outname, types, functions, header=None, modname=None,
       existingTypes=None, errorfunc=None, globalVars=None, deepInspect=False,
       namelessEnums=False,
-      namespaceFilter=lambda name, space, die: name in space.subspaces ):
+      namespaceFilter=lambda name, space, die: name in space.subspaces,
+      macroFiles=None, trailer=None ):
    '''  External interface to generate code from a set of binaries, into a python
    module.
    Parameters:
@@ -1406,9 +1409,9 @@ def generate( libnames, outname, types, functions, header=None, modname=None,
    return generateDwarf( dwarves,
                          outname, types, functions, header, modname, existingTypes,
                          errorfunc, globalVars, deepInspect, namelessEnums,
-                         namespaceFilter )
+                         namespaceFilter, macroFiles, trailer )
 
-def generateAll( libs, outname, modname=None ):
+def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None ):
    ''' Simplified "generate" that will generate code for all types, functions,
    and variables in a library '''
    dwarves = getDwarves( libs )
@@ -1420,12 +1423,71 @@ def generateAll( libs, outname, modname=None ):
       return any( [ name in dwarf.dynnames() for dwarf in dwarves ] )
    return generateDwarf( dwarves, outname, types=lambda x, y, z: True,
          functions=allExterns, globalVars=allExterns, modname=modname,
-         namespaceFilter=lambda name, space, die: True )
+         namespaceFilter=lambda name, space, die: True, macroFiles=macroFiles,
+         trailer=trailer )
+
+class MacroCallback( object ):
+   def __init__( self, output, interested ):
+      self.filescope = []
+      self.interested = interested
+      self.defining = 0
+      self.output = output
+      self.output.write("# Macro definitions:\n")
+      self.defined = set()
+
+   def define(self, line, data):
+      if not self.defining:
+         return
+
+      firstSpace = data.find( ' ' )
+      firstParen = data.find( '(' )
+
+      if firstParen != -1 and firstParen < firstSpace:
+         return
+
+      # no-arg macro. We'll try and define it.
+      name = data[ 0:firstSpace ]
+
+      if name in self.defined:
+         return
+
+      value = data[ firstSpace + 1: ]
+      if value == "":
+         value = "None"
+      else:
+         newvalue, names = CTypeGen.expression.clean( value )
+         if newvalue is None:
+            return
+         value = newvalue
+         if name == value:
+            return
+         for n in names:
+            if n not in self.defined:
+               return
+
+      self.defined.add( name )
+      self.output.write( "%s = %s # %s:%d\n" %
+                        ( name, value, self.filescope[ -1 ][ 1 ], line ) )
+
+   def undef( self, line, data ):
+      pass
+
+   def startFile( self, line, dirname, filename ):
+      self.filescope.append( ( dirname, filename ) )
+      if filename in self.interested:
+         self.defining += 1
+
+   def endFile(self):
+      ( _, filename ) = self.filescope.pop()
+      if filename in self.interested:
+         self.defining -= 1
 
 def generateDwarf( binaries, outname, types, functions, header=None, modname=None,
       existingTypes=None, errorfunc=None, globalVars=None, deepInspect=False,
       namelessEnums=False,
-      namespaceFilter=lambda name, space, die: name in space.subspaces ):
+      namespaceFilter=lambda name, space, die: name in space.subspaces,
+      macroFiles=None,
+      trailer=None ):
 
    resolver = TypeResolver( binaries, types, functions, existingTypes, errorfunc,
          globalVars, deepInspect, namelessEnums, namespaceFilter )
@@ -1449,6 +1511,15 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
       if header is not None:
          content.write( header )
       resolver.write( content )
+
+      if macroFiles is not None:
+         macros = MacroCallback( content, macroFiles )
+         for binary in binaries:
+            for unit in binary.units():
+               unit.macros( macros )
+
+      if trailer is not None:
+         content.write( trailer )
 
    if modname is None:
       modname = outname.split( "." )[ 0 ]
