@@ -112,7 +112,7 @@ def checkOffsets( cls ):
    for field, offset in zip( cls._fields_, cls._ctypegen_offsets ):
       if offset is not None:
          ctypesOffset = getattr( cls, field[ 0 ] ).offset
-         if ctypesOffset != offset:
+         if ctypesOffset != offset and offset != -1:
             addError( "field %s of %s has offset %d, should be %d" %
                         ( field[ 0 ], str( cls ), ctypesOffset, offset ) )
 

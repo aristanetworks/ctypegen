@@ -117,8 +117,14 @@ struct Foo {
    enum BigNum bigEnum;
    int ( *aFuncPtr )( int );
    int aBitFieldPart1 : 10;
-   int aBitFieldPart2 : 10;
-   int aBitFieldPart3 : 5;
+   int aBitFieldPart2 : 5;
+   int : 17;
+   int : 9;
+   int aBitFieldPart3 : 6;
+   int : 2;
+   int aBitFieldPart4 : 8;
+   int : 2;
+   int aBitFieldPart5 : 22;
    AProperCplusplusNamespace::AStructureInTheCplusplusNamespace
       aCplusplusNamespacedField;
    AnonEnumWithTypedef anonEnumField;
