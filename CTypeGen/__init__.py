@@ -1009,6 +1009,7 @@ class TypeResolver( object ):
          "functionsFilter",
          "globalsFilter",
          "namespaceFilter",
+         "producers",
    ]
 
    def __init__( self, dwarves, requiredTypes, functions, existingTypes, errorfunc,
@@ -1022,6 +1023,7 @@ class TypeResolver( object ):
       self.existingTypes = existingTypes if existingTypes else []
       self.errorfunc = errorfunc if errorfunc else self.error
       self.errors = 0
+      self.producers = set()
       self.rootNamespace = Namespace( None, self, None )
       if callable( requiredTypes ):
          self.typesFilter = requiredTypes
@@ -1158,6 +1160,11 @@ class TypeResolver( object ):
       tag = die.tag()
       if tag == tags.DW_TAG_compile_unit or tag == tags.DW_TAG_partial_unit:
          # Just decend compile units without affecting any namespace scope
+         producer = die.DW_AT_producer
+         name = die.DW_AT_name
+         if producer is not None and name is not None:
+            self.producers.add( producer )
+
          return namespace
 
       if die.DW_AT_name is None:
@@ -1517,6 +1524,11 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
          for binary in binaries:
             for unit in binary.units():
                unit.macros( macros )
+         content.write("# (end Macro definitions)\n\n")
+         content.write( "CTYPEGEN_producers__ = {\n")
+         for p in resolver.producers:
+            content.write( "\t\"%s\"\n" % p )
+         content.write( "}\n")
 
       if trailer is not None:
          content.write( trailer )
