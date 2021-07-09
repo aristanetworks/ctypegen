@@ -18,6 +18,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wregister"
 #endif
+#define PY_SSIZE_T_CLEAN 1
 #include <Python.h>
 #ifdef __clang__
 #pragma GCC diagnostic pop
@@ -187,8 +188,13 @@ dieName( const Dwarf::DIE & die ) {
       return std::string( name );
 
    std::ostringstream os;
-   os << "anon_" << openFiles[ die.getUnit()->dwarf ]->fileId << "_"
-      << die.getOffset();
+   auto it = openFiles.find(die.getUnit()->dwarf);
+   // We may not have an open file if we have a separate dwarf object.  For a
+   // dwz split image, we'll only have one for all units, so just use a large
+   // fixed ID.
+   int id = it != openFiles.end() ? it->second->fileId : 1000000;
+
+   os << "anon_" << id << "_" << die.getOffset();
    switch ( die.tag() ) {
     case Dwarf::DW_TAG_structure_type:
       os << "_struct";
