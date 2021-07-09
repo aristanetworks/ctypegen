@@ -227,7 +227,7 @@ getFullName( const Dwarf::DIE & die, container & fullname, bool leaf = true ) {
    }
    if ( die.getParentOffset() != 0 ) {
       const Dwarf::DIE & parent =
-         die.getUnit()->offsetToDIE( die.getParentOffset() );
+         die.getUnit()->offsetToDIE( Dwarf::DIE(), die.getParentOffset() );
       getFullName( parent, fullname, false );
    }
    if ( leaf || namespacetags.find( die.tag() ) != namespacetags.end() ) {
@@ -287,7 +287,7 @@ findDefinition( const Dwarf::DIE & die,
     case Dwarf::DW_TAG_compile_unit:
       // Compile units are a bit special - we just fall into them, but they don't
       // consume a namespace.
-      for ( const auto c : die.children() ) {
+      for ( const auto &c : die.children() ) {
          const auto ischild = findDefinition< T >( c, tag, first, end );
          if ( ischild )
             return ischild;
@@ -543,28 +543,35 @@ elf_dynnames( PyObject * self, PyObject * args ) {
       std::map< Elf::Addr, PyObject * > addr2dynname;
       auto obj = pyelf->dwarf->elf;
 
+      auto dynsyms = obj->dynamicSymbols();
       // First, create mapping from addr to list-of-dynamic-name
-      for ( const auto sym : obj->commonSections->dynamicSymbols ) {
-         if ( sym.symbol.st_shndx == SHN_UNDEF )
-            continue;
-         if ( sym.isHidden() )
-            continue;
-         auto & list = addr2dynname[ sym.symbol.st_value ];
-         if ( list == nullptr ) {
-            list = PyList_New( 0 );
+      if (dynsyms) {
+         for ( const auto sym : *dynsyms ) {
+            if ( sym.symbol.st_shndx == SHN_UNDEF )
+               continue;
+            if ( sym.isHidden() )
+               continue;
+            auto & list = addr2dynname[ sym.symbol.st_value ];
+            if ( list == nullptr ) {
+               list = PyList_New( 0 );
+            }
+            PyList_Append( list, makeString( sym.name ) );
          }
-         PyList_Append( list, makeString( sym.name ) );
       }
 
-      // Now map from debug symbol name to list-of-dynamic-symbol-names
-      for ( const auto & sym : obj->commonSections->debugSymbols ) {
-         auto dyn = addr2dynname.find( sym.symbol.st_value );
-         if ( dyn == addr2dynname.end() )
-            continue;
-         auto key = makeString( sym.name );
-         Py_INCREF( dyn->second );
-         PyDict_SetItem( pyelf->dynnames, key, dyn->second );
+      auto debugsyms = obj->debugSymbols();
+      if (debugsyms) {
+         // Now map from debug symbol name to list-of-dynamic-symbol-names
+         for ( const auto & sym : *debugsyms ) {
+            auto dyn = addr2dynname.find( sym.symbol.st_value );
+            if ( dyn == addr2dynname.end() )
+               continue;
+            auto key = makeString( sym.name );
+            Py_INCREF( dyn->second );
+            PyDict_SetItem( pyelf->dynnames, key, dyn->second );
+         }
       }
+
       // Clean up all our addr->dyn references.
       for ( auto i : addr2dynname )
          Py_DECREF( i.second );
@@ -634,7 +641,8 @@ static PyObject *
 entry_parent( PyObject * self, PyObject * args ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
    if ( ent->die.getParentOffset() != 0 ) {
-      auto parent = ent->die.getUnit()->offsetToDIE( ent->die.getParentOffset() );
+      auto parent = ent->die.getUnit()->offsetToDIE( Dwarf::DIE(),
+                                                     ent->die.getParentOffset() );
       return makeEntry( parent );
    }
    Py_RETURN_NONE;
@@ -758,6 +766,7 @@ pyAttr( Dwarf::AttrName name, const Dwarf::Attribute & attr ) {
          return PyLong_FromUnsignedLong( uintmax_t( attr ) );
 
        case Dwarf::DW_FORM_sdata:
+       case Dwarf::DW_FORM_implicit_const:
          return PyLong_FromLongLong( intmax_t( attr ) );
 
        case Dwarf::DW_FORM_udata:

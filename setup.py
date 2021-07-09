@@ -37,6 +37,7 @@ pstack_extension_options = {
     'libraries' : [ 'dwelf' ],
     'include_dirs' : [ pstack_base + "/include" ],
     'library_dirs' : [ pstack_base + "/lib" ],
+    'runtime_library_dirs' : [ pstack_base + "/lib" ],
 }
 
 setup( name="CTypeGen",

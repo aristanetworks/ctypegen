@@ -18,12 +18,14 @@ PYTHON ?= $(shell which python) # default to whatever interpreter is installed t
 PYTHONPATH = $(PWD):$(wildcard $(PWD)/build/lib*)
 
 all: build-all CMock/libc.py
+	echo "built for $(PYTHON)"
 
 build-all:
 	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py build
 install:
 	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
 test:
+	echo "$(PYTHONPATH)"
 	PYTHONPATH=$(PYTHONPATH) make -C test
 
 dbghelper.o: CFLAGS=-O0 -g -fPIC

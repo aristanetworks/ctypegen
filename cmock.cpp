@@ -18,6 +18,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wregister"
 #endif
+#define PY_SSIZE_T_CLEAN 1
 #include <Python.h>
 #ifdef __clang__
 #pragma GCC diagnostic pop

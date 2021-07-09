@@ -44,6 +44,7 @@ broken = set( [
       "raise", # python keyword.
       "stackblock",
       "timex",
+      "link_map",
       "_Unwind_Exception",
 
        ] )
