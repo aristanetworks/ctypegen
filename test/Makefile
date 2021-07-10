@@ -16,8 +16,8 @@ PYTHON ?= $(shell which python) # default to whatever interpreter is installed t
 PYTHONPATH ?= $(wildcard ../build/*lib*):..
 .PHONY: all check clean check-pre-mock check-mock check-ctypesanity
 
-CXXFLAGS += -g -fPIC
-CFLAGS += -g -fPIC
+CXXFLAGS += -g3 -fPIC
+CFLAGS += -g3 -fPIC
 
 all: check
 CTypeSanity: CTypeSanityC.o CTypeSanity.o

@@ -40,7 +40,6 @@
 #include <sys/types.h>
 #include <sys/ucontext.h>
 #include <sys/un.h>
-#include <sys/ustat.h>
 #include <sys/wait.h>
 
 #include <ctype.h>

@@ -117,15 +117,22 @@ struct Foo {
    InANamespace anInstanceOfInANamespace;
    enum BigNum bigEnum;
    int ( *aFuncPtr )( int );
+
+   // first int:
    int aBitFieldPart1 : 10;
    int aBitFieldPart2 : 5;
    int : 17;
-   int : 9;
-   int aBitFieldPart3 : 6;
-   int : 2;
-   int aBitFieldPart4 : 8;
-   int : 2;
+
+   // second int:
+   int : 9;                     // 0 : need to fake this with pre-padding for ctypes.
+   int aBitFieldPart3 : 6;      // 9
+   int : 2;                     // 15
+   int aBitFieldPart4 : 8;      // 17
+   int : 2;                     // 25
+
+   // third int.
    int aBitFieldPart5 : 22;
+
    AProperCplusplusNamespace::AStructureInTheCplusplusNamespace
       aCplusplusNamespacedField;
    AnonEnumWithTypedef anonEnumField;

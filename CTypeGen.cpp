@@ -518,7 +518,7 @@ unit_macros( PyObject * self, PyObject * args ) {
    const Dwarf::Macros *macros = unit->getMacros();
    if ( macros != nullptr ) {
       PythonMacros visitor( unit, callback );
-      if ( !macros->visit( unit->dwarf, &visitor ) )
+      if ( !macros->visit( unit.get(), &visitor ) )
          return nullptr;
    }
    Py_RETURN_NONE;
@@ -839,6 +839,7 @@ pyAttr( Dwarf::AttrName name, const Dwarf::Attribute & attr ) {
        case Dwarf::DW_FORM_GNU_strp_alt:
        case Dwarf::DW_FORM_string:
        case Dwarf::DW_FORM_strp:
+       case Dwarf::DW_FORM_line_strp:
          return makeString( std::string( attr ) );
        case Dwarf::DW_FORM_ref1:
        case Dwarf::DW_FORM_ref2:

@@ -330,11 +330,6 @@ class Member( object ):
    def size( self ):
       return self.type().size()
 
-   def bit_offset( self ):
-      if self.ctypeOverride != None:
-         return None
-      return self.die.DW_AT_bit_offset
-
    def bit_size( self ):
       if self.ctypeOverride != None:
          return None
@@ -350,6 +345,33 @@ class Member( object ):
    def setCType( self, ctype ):
       self.ctypeOverride = ctype
       self.pre_pads = []
+
+
+def die_size( die ):
+   datatype = die
+   while datatype.DW_AT_byte_size is None:
+       datatype = datatype.DW_AT_type
+       if datatype is None:
+           raise Exception( "no size for field %s" % die.name() )
+   return datatype.DW_AT_byte_size
+
+def die_bit_offset( die ):
+   ''' return the bit offset of the bitfield, relative to the lowest address
+   of the memory object it occupies '''
+
+   if die.DW_AT_data_bit_offset is not None:
+      return die.DW_AT_data_bit_offset
+   if die.DW_AT_bit_offset is not None:
+
+      size = die_size( die )
+
+      # XXX: litte-endian specific
+      return \
+            die.DW_AT_data_member_location * 8 + \
+            size * 8 - \
+            die.DW_AT_bit_size - \
+            die.DW_AT_bit_offset
+   return None
 
 class MemberType( Type ):
    ''' A struct, class  or union type - anything that has fields. '''
@@ -370,8 +392,8 @@ class MemberType( Type ):
          return
       superCount = 0
       anon_field = 0
-      remaining_bits = 0
-      bit_data_loc = -1
+      expected_end = -1
+      expected_next = -1
 
       for field in self.definition():
          tag = field.tag()
@@ -409,28 +431,30 @@ class MemberType( Type ):
             # with anonymous bitfields taking up entire data objects before
             # non-bitfield fields.
 
-            if field.DW_AT_bit_offset is not None:
-               if field.DW_AT_data_member_location != bit_data_loc:
-                  if bit_data_loc != -1 and field.DW_AT_bit_size <= remaining_bits:
+            off = die_bit_offset(field)
+            if off is not None:
+               if off >= expected_end:
+                  if field.DW_AT_bit_size <= expected_end - expected_next:
                      # We're in the middle of processing a sequence of
                      # bitfields, we've moved on to a new data object, but this
                      # new bitfield would fit in the previous word. We need to add
                      # padding.
-                     member.pre_pads.append( remaining_bits )
+                     member.pre_pads.append( expected_end - expected_next )
 
-                  # save new data location
-                  bit_data_loc = field.DW_AT_data_member_location
-                  bit_data_size = field.DW_AT_byte_size
-                  remaining_bits = bit_data_size * 8
+                  # off may != expected_end if there's more anon fields before this
+                  expected_next = off if expected_next == -1 else expected_end
 
-               diff = remaining_bits - field.DW_AT_bit_offset - field.DW_AT_bit_size
+                  expected_end = expected_next + die_size( field ) * 8
+
+               diff = off - expected_next
                if diff != 0:
                   member.pre_pads.append( diff )
-                  remaining_bits -= diff
-               remaining_bits -= field.DW_AT_bit_size
+               expected_next = off + field.DW_AT_bit_size
 
             else: # non-bitfield
-               bit_data_loc = -1
+               expected_end = -1
+               expected_next = -1
+
             self.members.append( member )
 
          # Ignore things that don't contribute to the CType definition -

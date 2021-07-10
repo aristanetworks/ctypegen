@@ -43,12 +43,14 @@ pstack_extension_options = {
 setup( name="CTypeGen",
         version="0.9",
         packages=[
-           "CMock"
+           "CMock",
+           "CTypeGen",
         ],
+
         py_modules=[
-            "CTypeGen",
             "CTypeGenRun",
         ],
+
         ext_modules=[
             Extension( 'libCTypeGen', [ 'CTypeGen.cpp', ],
                 **pstack_extension_options ),
