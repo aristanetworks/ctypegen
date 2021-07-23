@@ -19,3 +19,17 @@ int
 test_qualifiers( char * restrict foo1, volatile char * foo2 ) {
    return test_qualifiers( foo1, foo2 );
 }
+
+// C allows us to have a tagged type with the same name as an untagged typedef.
+// Make sure we can deal with that.
+
+struct DistinctStructAndTypedef {
+   int this_is_the_struct;
+};
+
+typedef union _DistinctStructAndTypedef {
+   int this_is_the_typedef;
+} DistinctStructAndTypedef;
+
+struct DistinctStructAndTypedef thisIsTheStruct;
+DistinctStructAndTypedef thisIsTheTypedef;

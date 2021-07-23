@@ -34,6 +34,20 @@ import libCTypeGen # pylint: disable=import-error
 tags = libCTypeGen.tags
 attrs = libCTypeGen.attrs
 
+# Provide aliases for tag names so users don't have to delve into libCTypeGen
+ELEMENT_STRUCT = tags.DW_TAG_structure_type
+ELEMENT_UNION = tags.DW_TAG_union_type
+ELEMENT_CLASS = tags.DW_TAG_class_type
+ELEMENT_ENUM = tags.DW_TAG_enumeration_type
+ELEMENT_TYPEDEF = tags.DW_TAG_typedef
+
+TAGGED_ELEMENTS = set( [
+   ELEMENT_STRUCT,
+   ELEMENT_UNION,
+   ELEMENT_CLASS,
+   ELEMENT_ENUM,
+] )
+
 # python3 doesn't have basestring
 try:
    baseString = basestring # pylint: disable=basestring-builtin
@@ -127,6 +141,9 @@ class Type( object ):
          "resolver", "die", "_name", "spec", "defdie", "defined", "declared"
    ]
 
+   def namePrefix( self ):
+      return ""
+
    def __init__( self, resolver, die ):
       self.resolver = resolver
       self._name = "::".join( die.fullname() ) if die else "void"
@@ -160,9 +177,9 @@ class Type( object ):
          return u""
       return u"# DIE %s" % self.name()
 
-   def pyName( self ):
+   def pyName( self, withTag=True ):
       ''' Remove non-python characters from this type's name'''
-      return asPythonId( self.name() )
+      return asPythonId( self.name( withTag ) )
 
    def declare( self, out ):
       ''' Write to out any info required to refer to this type.'''
@@ -189,11 +206,12 @@ class Type( object ):
    def hasName( self ):
       return self._name is not None
 
-   def name( self ):
+   def name( self, withTag=True ):
       assert self._name
       if self.resolver.pkgname is not None:
-         return u'%s.%s' % ( self.resolver.pkgname, self._name )
-      return self._name
+         return u'%s.%s%s' % ( self.resolver.pkgname,
+               self.namePrefix() if withTag else "" , self._name )
+      return "%s%s" % ( self.namePrefix() if withTag else "", self._name )
 
    def ctype( self ):
       ''' Return the string representing the ctype type for this type.
@@ -211,7 +229,7 @@ class VoidType( Type ):
    def __init__( self, resolver ):
       super( VoidType, self ).__init__( resolver, None )
 
-   def name( self ):
+   def name( self, withTag=True ):
       return u"void"
 
 class FunctionType( Type ):
@@ -267,7 +285,8 @@ class FunctionDefType( FunctionType ):
       dynNames = self.die.object().dynnames().get( name )
       if dynNames is None:
          self.resolver.errorfunc( "cannot provide access to %s - "
-                                  " not in dynamic symbol table" % self.name() )
+                                  " '%s' not in dynamic symbol table" %
+                                  ( self.name(), name ) )
          return
 
       for linkername in dynNames:
@@ -599,7 +618,8 @@ class MemberType( Type ):
                typstr = "c_char * %d" % size
                self.resolver.errorfunc(
                      "padded %s:%s (no definition for %s)" % (
-                        self.name(), member.name(), member.type().name() ) )
+                        self.name( withTag=False ), member.name(),
+                        member.type().name() ) )
 
             else:
                typstr = member.ctype()
@@ -624,6 +644,9 @@ class StructType( MemberType ):
    ''' A member type for a structure (or class) '''
 
    __slots__ = []
+
+   def namePrefix( self ):
+      return "struct_"
 
    def ctype_subclass( self ):
       return u"Structure"
@@ -671,6 +694,9 @@ class UnionType( MemberType ):
    def ctype_subclass( self ):
       return u"Union"
 
+   def namePrefix( self ):
+      return "union_"
+
    def define( self, out ):
       if not super( UnionType, self ).define( out ):
          return False
@@ -681,6 +707,9 @@ class UnionType( MemberType ):
 
 class EnumType( Type ):
    __slots__ = []
+
+   def namePrefix( self ):
+      return "enum_"
 
    def define( self, out ):
       rtype = self.baseType()
@@ -748,7 +777,7 @@ class PrimitiveType( Type ):
          u"wchar_t" : u"c_wchar",
    }
 
-   def name( self ):
+   def name( self, withTag=True ):
       return self.ctype()
 
    def ctype( self ):
@@ -1231,6 +1260,15 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
             if ( hint.elements is None or tag in hint.elements ) \
                      and hint.pythonName != typ.ctype():
                stream.write( u'%s = %s\n' % ( hint.pythonName, typ.ctype() ) )
+
+      # If tagged types don't conflict with untagged, we can make aliases without
+      # the tag prefix
+      for name, byTag in self.types.items():
+         if len( byTag ) == 1:
+            for tag, typ in byTag.items():
+               if typ.defined and tag in TAGGED_ELEMENTS:
+                  stream.write( "%s = %s # unambiguous name for tagged type\n" % (
+                              typ.pyName( False ), typ.pyName( True ) ) )
 
       # Now write out a class definition containing an entry for each global
       # variable.

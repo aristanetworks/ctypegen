@@ -14,7 +14,7 @@
 #     limitations under the License.
 from __future__ import absolute_import, division, print_function
 from ctypes import c_char, CDLL, c_void_p, c_long, c_int, cast, sizeof
-from ctypes import POINTER, c_char_p, c_ulong
+from ctypes import POINTER, c_char_p, c_ulong, Structure, Union
 import sys
 
 from CTypeGen import generate, PythonType
@@ -50,6 +50,8 @@ globalVars = [
        "ExternalStruct",
        "NoSuchGlobal",
        "nameSharedWithStructAndTypedef",
+       "thisIsTheStruct",
+       "thisIsTheTypedef",
 ]
 
 warnCount = 0
@@ -181,6 +183,27 @@ assert sizeof( array ) == 17 * sizeof( array[ 0 ] ) # major axis - 17 elements
 print ( "Verify we can specify and disambiguate namespaced and unnamespaced types" )
 globl = module.GlobalLeaf()
 namespaced = module.NamespacedLeaf()
+
+print( "Verify we can distinguish structures and typedefs with the same name" )
+
+# make sure we can poke the appropriate fields in the global variables
+glob.thisIsTheStruct.this_is_the_struct = 1
+glob.thisIsTheTypedef.this_is_the_typedef = 2
+
+# The undecoraed "DistinctStructAndTypedef" should refer to the typedef of the union
+assert isinstance( module.DistinctStructAndTypedef(), Union )
+
+# The prefixed "struct_DistinctStructAndTypedef" should refer to the structure.
+assert isinstance( module.struct_DistinctStructAndTypedef(), Structure )
+
+# the typedef should refer to the _-prefixed union, and it in turn should have an
+# alias without the union_ prefix, because there is no typedef of that name.
+assert module.DistinctStructAndTypedef is module.union__DistinctStructAndTypedef
+
+# We need to access the underscore-named field. pylint: disable=protected-access
+assert module._DistinctStructAndTypedef is module.union__DistinctStructAndTypedef
+# pylint: enable=protected-access
+
 
 # Ensure we can assign something to the fields in these leaves: this checks that
 # the right type was found for the two distinct types.
