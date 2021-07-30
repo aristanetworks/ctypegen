@@ -437,16 +437,31 @@ unit_free( PyObject * o ) {
 }
 
 static PyObject *
-makeFullname( const Dwarf::DIE & die ) {
-   std::deque< std::string > namelist;
-   getFullName( die, namelist );
-   auto fullName = PyTuple_New( namelist.size() );
-   size_t i = 0;
-   for ( const auto & item : namelist ) {
-      PyTuple_SET_ITEM( fullName, i, makeString( item ) );
-      i++;
+makeFullnameR( const Dwarf::DIE & die, int depth ) {
+   auto spec = die.attribute( Dwarf::DW_AT_specification );
+   if ( spec.valid() ) {
+      return makeFullnameR( Dwarf::DIE( spec ), depth );
    }
-   return fullName;
+   auto poff = die.getParentOffset();
+   PyObject *tuple;
+   bool thisCounts = depth == 0 || namespacetags.find( die.tag() ) != namespacetags.end();
+   int nextDepth = thisCounts ? depth  + 1 : depth;
+   if (poff != 0) {
+      tuple = makeFullnameR( die.getUnit()->offsetToDIE( poff ), nextDepth );
+   } else {
+      tuple = PyTuple_New( nextDepth );
+   }
+   if ( thisCounts ) {
+      int idx = PyTuple_Size( tuple ) - depth - 1;
+      assert(idx >= 0 && idx < PyTuple_Size( tuple ));
+      PyTuple_SET_ITEM( tuple, idx, makeString( dieName( die ) ) );
+   }
+   return tuple;
+}
+
+static PyObject *
+makeFullname( const Dwarf::DIE & die ) {
+   return makeFullnameR( die, 0);
 }
 
 static PyObject *

@@ -96,10 +96,10 @@ module, generator = generate(
       )
 
 # under "clang" we generate a warning because we cannot completely define
-# the content of std::string
-assert warnCount == 3 or ( warnCount == 5
-      and "failed to find definition for std::allocator" in warnings[ 1 ]
-      and "padded std::basic_string" in warnings[ 2 ] )
+# the content of std::string, nor find std::allocator
+assert warnCount == 3 or ( warnCount == 5 and any(
+   "failed to find definition for std::allocator" in w for w in warnings ) \
+      and any( "padded std::basic_string" in w for w in warnings ) )
 clearWarnings()
 
 dll = CDLL( sanitylib )

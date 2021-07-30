@@ -124,7 +124,7 @@ class Type( object ):
    for structures, unions, functions, etc'''
 
    __slots__ = [
-         "resolver", "die", "_name", "spec", "defdie", "defined"
+         "resolver", "die", "_name", "spec", "defdie", "defined", "declared"
    ]
 
    def __init__( self, resolver, die ):
@@ -134,6 +134,7 @@ class Type( object ):
       self.die = die
       self.defdie = None
       self.defined = False
+      self.declared = False
 
    def definition( self ):
       if self.defdie:
@@ -262,7 +263,7 @@ class FunctionDefType( FunctionType ):
       base = self.baseType()
       name = self.die.DW_AT_linkage_name
       if name is None:
-         name = self.name()
+         name = self.die.name()
       dynNames = self.die.object().dynnames().get( name )
       if dynNames is None:
          self.resolver.errorfunc( "cannot provide access to %s - "
@@ -497,14 +498,19 @@ class MemberType( Type ):
                # Allow a simple string for this.
                if not isinstance( typedesc, PythonType ):
                   typedesc = PythonType( typedesc, None )
+               # we now know the C name for this type.
                typedesc.cName = member.type().name()
-               typedesc.type = member.type()
 
                memberTypeDIE = member.die.DW_AT_type
                typ = self.resolver.dieToType( memberTypeDIE )
+
+               # Now that we have a DIE name for the hint, we can register it with
+               # the resolver's typeHints. This is to give it a customized name
+               # later
+               self.resolver.typeHints[ memberTypeDIE.fullname() ] = typedesc
+
+               # Apply the hints now, recursively.
                typ.applyHints( typedesc )
-               # add to names we'll define later
-               self.resolver.requiredTypes.append( typedesc )
 
             # Provide an alternative name for a field in a struct.
             if hint.name:
@@ -598,7 +604,7 @@ class MemberType( Type ):
             else:
                typstr = member.ctype()
             if member.bit_size():
-               for idx, padding in enumerate(member.pre_pads):
+               for idx, padding in enumerate( member.pre_pads ):
                   out.write( u"   ( \"%s\", %s, %d ),\n" %
                      ( "%s_prepad_%d" % ( member.pyName(), idx ), typstr, padding ) )
                out.write( u"   ( \"%s\", %s, %d ),\n" %
@@ -801,8 +807,8 @@ class PointerType( Type ):
           self.baseType() is not None and
           not self.baseType().definition().DW_AT_declaration ):
          t = self.baseType()
-         if t not in r.definedTypes:
-            r.indirectTypes.add( t )
+         if t not in r.types:
+            r.defineTypes.add( t )
       return True
 
    def ctype( self ):
@@ -919,186 +925,136 @@ typeFromTag = {
       tags.DW_TAG_ptr_to_member_type : PointerType,
 }
 
-class Namespace( object ):
-   ''' We use the Namespace object to limit our scanning of the entire DIE tree
-   Each name we are looking for (type, global, function) is in a namespace.
-   We don't decend into namespaces if we're not interested in them
-
-   Each namespace contains a list of types, variables, and functions that
-   we want defined in that namespace, and also a set of subordinate namespaces
-   we are also interested in.
-   '''
-
-   __slots__ = [ "types", "variables", "functions",
-         "subspaces", "parent", "name_", "resolver" ]
-
-   def __init__( self, parent, resolver, name ):
-
-      class NamespaceDict( defaultdict ):
-         def __init__( self, namespace ):
-            super( NamespaceDict, self ).__init__()
-            self.namespace = namespace
-
-         def __missing__( self, key ):
-            ns = self.namespace
-            newspace = Namespace( ns, ns.resolver, key )
-            self[ key ] = newspace
-            return newspace
-
-      class TypesDict( defaultdict ):
-         def __missing__( self, key ):
-            newtype = PythonType( key )
-            self[ key ] = newtype
-            return newtype
-
-      self.types = TypesDict()
-      self.variables = {}
-      self.functions = {}
-      self.subspaces = NamespaceDict( self )
-      self.parent = parent
-      self.name_ = name
-      self.resolver = resolver
-
-   def recurse( self, func ):
-      func( self )
-      for subns in itervalues( self.subspaces ):
-         subns.recurse( func )
-
-   def depth( self ):
-      if self.parent is None:
-         return 0
-      else:
-         return 1 + self.parent.depth()
-
-   def name( self ):
-      if self.parent:
-         if self.parent.parent:
-            return self.parent.name() + "::" + self.name_
-         return self.name_
-      return None
-
-   def addToSet( self, nameList, accessor ):
-      ''' add namelist (a list specifying a scoped name) to the namespace.  If
-      the name is of length > 1, then the leaf object exists in a sub-namespace
-      of this one: we recursively ensure that the immediate namespace exists,
-      and pass the suffix of the list down to that namespace.
-
-      When we reach the leaf, the item to add may be a variable, function or
-      type - the accessor provides a way to extract the correct list from the
-      leaf namespace, and the value to insert.
-
-      For vars and functions, we just insert a None object. For types,
-      we leave a pointer to the "spec", i.e., PythonType.
-      '''
-
-      thisName = nameList[ 0 ]
-      if len( nameList ) == 1:
-         container, value = accessor( self )
-         if thisName in container:
-            self.resolver.errorfunc( "duplicate name: %s" % thisName )
-         else:
-            container[ thisName ] = value
-      else:
-         self.subspaces[ thisName ].addToSet( nameList[ 1 : ], accessor )
-
-   def addType( self, spec ):
-      self.addToSet( spec.cName.split( "::" ), lambda ns: ( ns.types, spec ) )
-
-   def addVar( self, fqn ):
-      self.addToSet( fqn.split( "::" ), lambda ns: ( ns.variables, None ) )
-
-   def addFunc( self, fqn ):
-      self.addToSet( fqn.split( "::" ), lambda ns: ( ns.functions, None ) )
-
 class TypeResolver( object ):
 
    ''' Construct a python file with a set of Ctypes derived from a
    DWARF-annotated binary '''
 
    __slots__ = [
+
+         "deepInspect",
+         "defineTypes",
          "dwarves",
-         "typesByDieKey",
-         "declaredTypes",
-         "definedTypes",
-         "pkgname",
-         "existingTypes",
          "errorfunc",
          "errors",
-         "rootNamespace",
-         "requiredTypes",
-         "deepInspect",
-         "namelessEnums",
-         "indirectTypes",
-         "typesFilter",
+         "existingTypes",
+         "functions",
          "functionsFilter",
          "globalsFilter",
+         "namelessEnums",
          "namespaceFilter",
+         "pkgname",
          "producers",
+         "typeHints",
+         "types",
+         "typesFilter",
+         "variables",
+
    ]
 
-   def __init__( self, dwarves, requiredTypes, functions, existingTypes, errorfunc,
+   def __init__( self, dwarves, typeHints, functions, existingTypes, errorfunc,
                  globalVars, deepInspect, namelessEnums, namespaceFilter ):
 
       self.dwarves = dwarves
-      self.typesByDieKey = {}
-      self.declaredTypes = {}
-      self.definedTypes = {}
+
+      self.types = {} # index by DIE fullname, then tag.
+      self.variables = {} # index by DIE fullname
+      self.functions = {} # index by DIE fullname
+      self.defineTypes = set() # Types we want to define.
+
       self.pkgname = None
       self.existingTypes = existingTypes if existingTypes else []
       self.errorfunc = errorfunc if errorfunc else self.error
       self.errors = 0
       self.producers = set()
-      self.rootNamespace = Namespace( None, self, None )
-      if callable( requiredTypes ):
-         self.typesFilter = requiredTypes
-         self.requiredTypes = []
+      self.typeHints = {}
+
+      allNamespaces = set()
+
+      def addNamespace( name ):
+         if len( name ) > 1:
+            for i in range( 1, len( name ) ):
+               allNamespaces.add( name [ :i ] )
+
+      # if we have callable functions for finding things, we can't skip any
+      # namespaces. Otherwise, we can optimise by ignoring namespaces we know
+      # from the start we don't care about.
+      wildcardNamespace = False
+
+      if callable( typeHints ):
+         self.typesFilter = typeHints
+         wildcardNamespace = True
       else:
-         self.typesFilter = lambda name, namespace, die: name in namespace.types
-         self.requiredTypes = [ r if isinstance( r, PythonType ) else PythonType( r )
-                                for r in requiredTypes ]
-         for n in self.requiredTypes:
-            self.rootNamespace.addType( n )
+         for hint in typeHints:
+            if not isinstance( hint, PythonType ):
+               hint = PythonType( hint )
+            name = tuple( hint.cName.split( "::" ) )
+            self.typeHints[ name ] = hint
+            addNamespace( name )
+
+         self.typesFilter = lambda die: die.fullname() in self.typeHints
 
       self.deepInspect = deepInspect
       self.namelessEnums = namelessEnums
-      self.indirectTypes = set()
 
       # Add all the names we're interested in if supplied with lists, otherwise
       # set appropriate callbacks if the supplied args are callable.
 
       if callable( globalVars ):
          self.globalsFilter = globalVars
+         wildcardNamespace = True
+      elif globalVars:
+         globalVars = [
+               ( n if isinstance( n, tuple ) else tuple( ( n.split( "::" ) ) ) )
+                  for n in globalVars ]
+
+         self.globalsFilter = lambda die: die.fullname() in globalVars
+         for k in globalVars:
+            self.variables[ k ] = None
+            addNamespace( k )
+
       else:
-         self.globalsFilter = lambda name, namespace, die: \
-                 name in namespace.variables
-         if globalVars:
-            for n in globalVars:
-               self.rootNamespace.addVar( n )
+         self.globalsFilter = lambda die: False # no globals
 
       if callable( functions ):
          self.functionsFilter = functions
+         wildcardNamespace = True
+      elif functions:
+         functions = [ ( n if isinstance( n, tuple ) else
+            tuple( ( n.split( "::" ) ) ) ) for n in functions ]
+         self.functionsFilter = lambda die: die.fullname() in functions
+         for n in functions:
+            self.functions[ n ] = None
+            addNamespace( n )
       else:
-         self.functionsFilter = lambda name, namespace, die: \
-                                    name in namespace.functions
-         if functions:
-            for n in functions:
-               self.rootNamespace.addFunc( n )
+         self.functionsFilter = lambda die: False # no functions
 
-      self.namespaceFilter = namespaceFilter
+      if namespaceFilter is None:
+         if wildcardNamespace:
+            self.namespaceFilter = lambda die: True
+         else:
+            self.namespaceFilter = lambda die: die.fullname() in allNamespaces
+
       try:
          for dwarf in self.dwarves:
             for u in dwarf.units():
-               self.enumerateDIEs( u.root(), self.examineDIE, self.rootNamespace )
+               self.enumerateDIEs( u.root(), self.examineDIE )
       except StopIteration:
          pass
 
       # We should now have DIEs for everything we care about. Go through and apply
-      # hints
-      for i in self.requiredTypes:
-         if i.type is None:
-            self.errorfunc( "no type for %s" % i.pythonName )
-            continue
-         i.type.applyHints( i )
+      # hints. We may grab extra types from hints as we apply them - this happens
+      # for fields where we don't know the type up front (eg, anon structures).
+      # We apply the hints recursively, so we don't need to iterate over the list
+      # repeatedly, but we do need to copy the items iterator.
+      for name, hint in list( self.typeHints.items() ):
+         types = self.types.get( name )
+         if types:
+            for tag, typ in types.items():
+               if hint.elements is None or tag in hint.elements:
+                  typ.applyHints( hint )
+         else:
+            self.errorfunc( "no type found for %s" % hint.cName )
 
    # These are the named types we can generate definitions for
    typeDieTags = (
@@ -1123,18 +1079,24 @@ class TypeResolver( object ):
       if die is None:
          return VoidType( self )
 
-      key = self.dieKey( die )
-
-      if key in self.typesByDieKey:
-         return self.typesByDieKey[ key ]
+      tag = die.tag()
+      name = die.fullname()
+      if name not in self.types:
+         self.types[ name ] = {}
+      bytag = self.types[ name ]
+      if tag in bytag:
+         return bytag[ tag ]
 
       for existingSet in self.existingTypes:
-         if key in existingSet.definedTypes:
-            return existingSet.definedTypes[ key ]
+         existingTags = existingSet.types.get( name )
+         if existingTags:
+            existingType = existingTags.get( tag )
+            if existingType and existingType.defined:
+               bytag[ tag ] = existingType # "import" this type.
+               return existingType
 
       newType = typeFromTag[ die.tag() ]( self, die )
-
-      self.typesByDieKey[ key ] = newType
+      bytag[ tag ] = newType
       return newType
 
    def declareType( self, typ, out ):
@@ -1142,13 +1104,12 @@ class TypeResolver( object ):
       if typ is None:
          return
 
-      key = self.dieKey( typ.die )
-      if key in self.declaredTypes:
+      if typ.declared:
          return
       if typ.resolver != self: # This type came from a different module - use as is
          return
-      self.declaredTypes[ key ] = typ
       typ.declare( out )
+      typ.declared = True
 
    def defineType( self, typ, out ):
       ''' Idempotent wrapper for Type.define '''
@@ -1162,77 +1123,62 @@ class TypeResolver( object ):
          self.errorfunc( "%s is 'void' - cannot output definition" % typ.name() )
          return True
 
-      key = self.dieKey( typ.die )
-      if key not in self.definedTypes:
-         self.definedTypes[ key ] = typ
-         typ.defined = typ.define( out )
+      typ.defined = typ.define( out )
       assert typ.defined is not None # typ.define should return a bool.
       return typ.defined
 
-   def dieKey( self, die ):
-      return ( die.tag(), die.fullname() )
-
-   def examineDIE( self, handle, die, namespace ):
+   def examineDIE( self, handle, die ):
       ''' Find any potentially interesting dwarf DIEs
-
-      Returns:
-        Namespace: None if we are not interested in the child DIEs, or the
-        namespace associated with this DIE if we are.
-
       '''
 
       tag = die.tag()
       if tag == tags.DW_TAG_compile_unit or tag == tags.DW_TAG_partial_unit:
          # Just decend compile units without affecting any namespace scope
          producer = die.DW_AT_producer
-         name = die.DW_AT_name
-         if producer is not None and name is not None:
+         if producer is not None:
             self.producers.add( producer )
-
-         return namespace
+         return True
 
       if die.DW_AT_name is None:
-         return None # Ignore anything without its own name
-
-      name = die.name()
+         return False # Ignore anything without its own name
 
       if tag == tags.DW_TAG_variable:
-         if ( self.globalsFilter( name, namespace, die )
-              and namespace.variables.get( name ) is None ):
-            namespace.variables[ name ] = die
-         return None
+         if ( self.globalsFilter( die )
+              and self.variables.get( die.fullname() ) is None ):
+            self.variables[ die.fullname() ] = die
+         return False
 
       # Only consider definitions, not declarations.
       if die.DW_AT_declaration:
-         return None
+         return False
 
       if tag == tags.DW_TAG_subprogram:
-         if ( namespace.functions.get( name ) is None
-               and self.functionsFilter( name, namespace, die ) ):
-            namespace.functions[ name ] = die
-         return None
+         if self.functions.get( die.fullname() ) is None and \
+               self.functionsFilter( die ):
+            self.functions[ die.fullname() ] = die
+         return False
 
       if tag in TypeResolver.typeDieTags:
-         if ( self.typesFilter( name, namespace, die )
-               and namespace.types[ name ].type is None ):
-            namespace.types[ name ].type = self.dieToType( die )
+         if self.typesFilter( die ):
+            self.defineTypes.add( self.dieToType( die ) )
+         # Type DIEs are also namespaces - deal with namespaces for return
+         # below.
 
       # If its a struct or namespace, and we're interested in any DIEs inside
       # the namespace, descend it.
       if tag in TypeResolver.namespaceDieTags:
-         if self.namespaceFilter( name, namespace, die ):
-            return namespace.subspaces[ name ]
-      return None
+         if self.namespaceFilter( die ):
+            return True
+      return False
 
    def error( self, txt ):
       self.errors += 1
       sys.stderr.write( "error: %s\n" % txt )
 
-   def enumerateDIEs( self, die, func, ctx ):
-      ctx = func( self, die, ctx )
-      if ctx is not None:
+   def enumerateDIEs( self, die, func ):
+      if func( self, die ):
          for child in die:
-            self.enumerateDIEs( child, func, ctx )
+            self.enumerateDIEs( child, func )
 
    def write( self, stream ):
       ''' Actually write the python file to a stream '''
@@ -1248,52 +1194,61 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          stream.write( u"import %s\n" % pkg.pkgname )
       stream.write( u"\n" )
 
-      def doNSTypes( ns ):
-         # Define types we wanted.
-         for spec in itervalues( ns.types ):
-            self.defineType( spec.type, stream )
+      # Define any types needed by variables or functions, as they may
+      # contribute to self.types.
 
-         # Define types for variables we wanted.
-         for name, die in iteritems( ns.variables ):
-            if die is None:
-               self.errorfunc( "variable %s not found in namespace %s" %
-                               ( name, ns.name() ) )
-            else:
-               self.defineType( self.dieToType( die.DW_AT_type ), stream )
+      for name, die in iteritems( self.variables ):
+         if die is None:
+            self.errorfunc( "variable %s not found" % name )
+         else:
+            self.defineType( self.dieToType( die.DW_AT_type ), stream )
 
-         # define function types we wanted.
-         for name, die in iteritems( ns.functions ):
-            if die:
-               self.dieToType( die ).define( stream )
-            else:
-               self.errorfunc( "function %s not found" % name )
+      for name, die in iteritems( self.functions ):
+         if die:
+            self.dieToType( die ).define( stream )
+         else:
+            self.errorfunc( "function %s not found" % name )
 
-      self.indirectTypes = set()
-      self.rootNamespace.recurse( doNSTypes )
       while True:
-         indirectTypes = self.indirectTypes
-         if not indirectTypes:
+         # As we define types, in "deepInspect" mode, we may get new types added
+         # for each iteration. We keep going until there are no more types.
+         types = self.defineTypes
+         self.defineTypes = set()
+         if not types:
             break
-         sys.stderr.write( "defining %d more types for deep inspection\n" %
-                           len( indirectTypes ) )
-         self.indirectTypes = set()
-         for t in sorted( indirectTypes ):
+         for t in types:
             self.defineType( t, stream )
+
+      # For any PythonType hints, if the cName != the desired python name, then
+      # add an assignment to make them equivalent. This happens for types
+      # defined in other, existing, modules too, so we can give them names in
+      # this module.
+      for name, hint in sorted( self.typeHints.items() ):
+         types = self.types.get( name )
+         if not types:
+            continue # We've already warned about missing types.
+         for tag, typ in types.items():
+            if ( hint.elements is None or tag in hint.elements ) \
+                     and hint.pythonName != typ.ctype():
+               stream.write( u'%s = %s\n' % ( hint.pythonName, typ.ctype() ) )
 
       # Now write out a class definition containing an entry for each global
       # variable.
       stream.write( u"class Globals(object):\n" )
       stream.write( u"%sdef __init__(self, dll):\n" % pad( 3 ) )
 
-      def doGlobalVars( ns ):
-         for name, die in iteritems( ns.variables ):
-            if die is None:
-               continue
-            t = self.dieToType( die.DW_AT_type )
-            stream.write( u"%sself.%s = ( %s ).in_dll( dll, '%s' )\n" %
-                  ( pad( 6 ), name, t.ctype(), name ) )
+      for _, die in sorted( self.variables.items() ):
+         if die is None:
+            continue
+         t = self.dieToType( die.DW_AT_type )
 
-      self.rootNamespace.recurse( doGlobalVars )
+         cname = die.DW_AT_linkage_name
+         if cname is None:
+            cname = die.DW_AT_name
+         pyName = asPythonId( "::".join( die.fullname() ) )
+
+         stream.write( u"%sself.%s = ( %s ).in_dll( dll, '%s' )\n" %
+               ( pad( 6 ), pyName, t.ctype(), cname ) )
 
       stream.write( u"%spass" % pad( 6 ) )
 
@@ -1301,15 +1256,13 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 
       stream.write( u'\ndef decorateFunctions( lib ):\n' )
 
-      def doFunctions( ns ):
-         for die in itervalues( ns.functions ):
-            if not die:
-               continue
-            t = self.dieToType( die )
-            t.writeLibUpdates( 3, stream )
-            ctypesProtos[ t.pyName() ] = t.ctype()
+      for _, die in sorted( self.functions.items() ):
+         if not die:
+            continue
+         t = self.dieToType( die )
+         t.writeLibUpdates( 3, stream )
+         ctypesProtos[ t.pyName() ] = t.ctype()
 
-      self.rootNamespace.recurse( doFunctions )
       stream.write( u'   pass\n' )
 
       if ctypesProtos:
@@ -1319,19 +1272,6 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          stream.write( u"}" )
 
       stream.write( u'\n\n' )
-
-      # If the python typename is different to the C type name, then just use
-      # an assignment.
-      for spec in self.requiredTypes:
-         if spec.type is None:
-            continue
-         if spec.pythonName != spec.type.ctype():
-            stream.write( u'%s = %s\n' %
-                  ( spec.pythonName, spec.type.ctype() ) )
-
-      # Make the whole shebang test itself when run.
-      stream.write( u'\nif __name__ == "__main__":\n' )
-      stream.write( u'   test_classes()\n' )
 
 class Hint( object ):
    ''' Hints indicate some modification to a field in a struct/union
@@ -1355,11 +1295,11 @@ class PythonType( object ):
 
    __slots__ = [
          "pythonName", "cName", "fieldHints", "pack", "base", "mixins",
-         "nameless_enum", "type"
+         "nameless_enum", "elements"
          ]
 
    def __init__( self, pythonName, cName=None, base=None, pack=False,
-           mixins=None, nameless_enum=None ):
+           mixins=None, nameless_enum=None, elements=None ):
       self.pythonName = pythonName
       self.cName = cName if cName is not None else pythonName
       self.fieldHints = {}
@@ -1367,7 +1307,7 @@ class PythonType( object ):
       self.base = base
       self.mixins = mixins
       self.nameless_enum = nameless_enum
-      self.type = None
+      self.elements = elements
 
    def field( self, field, typename=None, name=None, typeOverride=None,
          allowUnaligned=False ):
@@ -1407,9 +1347,7 @@ def getDwarves( libnames ):
 
 def generate( libnames, outname, types, functions, header=None, modname=None,
       existingTypes=None, errorfunc=None, globalVars=None, deepInspect=False,
-      namelessEnums=False,
-      namespaceFilter=lambda name, space, die: name in space.subspaces,
-      macroFiles=None, trailer=None ):
+      namelessEnums=False, namespaceFilter=None, macroFiles=None, trailer=None ):
    '''  External interface to generate code from a set of binaries, into a python
    module.
    Parameters:
@@ -1447,15 +1385,14 @@ def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None ):
    and variables in a library '''
    dwarves = getDwarves( libs )
 
-   def allExterns( name, space, die ):
+   def allExterns( die ):
       name = die.DW_AT_linkage_name
       if name is None:
          name = die.name()
       return any( [ name in dwarf.dynnames() for dwarf in dwarves ] )
-   return generateDwarf( dwarves, outname, types=lambda x, y, z: True,
+   return generateDwarf( dwarves, outname, types=lambda die: True,
          functions=allExterns, globalVars=allExterns, modname=modname,
-         namespaceFilter=lambda name, space, die: True, macroFiles=macroFiles,
-         trailer=trailer )
+         macroFiles=macroFiles, trailer=trailer )
 
 class MacroCallback( object ):
    def __init__( self, output, interested ):
@@ -1463,10 +1400,10 @@ class MacroCallback( object ):
       self.interested = interested
       self.defining = 0
       self.output = output
-      self.output.write("# Macro definitions:\n")
+      self.output.write( "# Macro definitions:\n" )
       self.defined = set()
 
-   def define(self, line, data):
+   def define ( self, line, data ):
       if not self.defining:
          return
 
@@ -1508,7 +1445,7 @@ class MacroCallback( object ):
       if filename in self.interested:
          self.defining += 1
 
-   def endFile(self):
+   def endFile( self ):
       ( _, filename ) = self.filescope.pop()
       if filename in self.interested:
          self.defining -= 1
@@ -1516,7 +1453,7 @@ class MacroCallback( object ):
 def generateDwarf( binaries, outname, types, functions, header=None, modname=None,
       existingTypes=None, errorfunc=None, globalVars=None, deepInspect=False,
       namelessEnums=False,
-      namespaceFilter=lambda name, space, die: name in space.subspaces,
+      namespaceFilter=None,
       macroFiles=None,
       trailer=None ):
 
@@ -1548,11 +1485,16 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
          for binary in binaries:
             for unit in binary.units():
                unit.macros( macros )
-         content.write("# (end Macro definitions)\n\n")
-         content.write( "CTYPEGEN_producers__ = {\n")
-         for p in resolver.producers:
-            content.write( "\t\"%s\"\n" % p )
-         content.write( "}\n")
+         content.write( "# (end Macro definitions)\n\n" )
+
+      content.write( "CTYPEGEN_producers__ = {\n" )
+      for p in resolver.producers:
+         content.write( "\t\"%s\",\n" % p )
+      content.write( "}\n" )
+
+      # Make the whole shebang test itself when run.
+      content.write( u'\nif __name__ == "__main__":\n' )
+      content.write( u'   test_classes()\n' )
 
       if trailer is not None:
          content.write( trailer )

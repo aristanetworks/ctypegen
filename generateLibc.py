@@ -25,7 +25,7 @@ from CTypeGen import generate
 import sys
 
 # These don't render properly - packed structures, bitfield issues, etc.
-broken = set( [
+broken = set( [ (n, ) for n in [ 
 
       "cached_data",
       "DIR",
@@ -47,7 +47,7 @@ broken = set( [
       "link_map",
       "_Unwind_Exception",
 
-       ] )
+       ] ] )
 
 def haveDyn( die ):
    ''' Filter for functions that are in the .dynsym section - we can't call
@@ -59,10 +59,14 @@ def haveDyn( die ):
       name = die.name()
    return name in obj.dynnames()
 
+
+def notBroken( die ):
+   return die.fullname() not in broken
+
 generate(
       [ "./libdbghelper.so", sys.argv[ 1 ] ],
       sys.argv[ 2 ],
-      types=lambda name, space, die: name not in broken,
-      functions=lambda name, space, die: name not in broken and haveDyn( die ),
+      types=notBroken,
+      functions=lambda die: notBroken( die ) and haveDyn( die ),
       macroFiles='dbghelper.c',
       )
