@@ -370,9 +370,9 @@ class Member( object ):
 def die_size( die ):
    datatype = die
    while datatype.DW_AT_byte_size is None:
-       datatype = datatype.DW_AT_type
-       if datatype is None:
-           raise Exception( "no size for field %s" % die.name() )
+      datatype = datatype.DW_AT_type
+      if datatype is None:
+         raise Exception( "no size for field %s" % die.name() )
    return datatype.DW_AT_byte_size
 
 def die_bit_offset( die ):

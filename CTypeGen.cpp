@@ -447,7 +447,7 @@ makeFullnameR( const Dwarf::DIE & die, int depth ) {
    bool thisCounts = depth == 0 || namespacetags.find( die.tag() ) != namespacetags.end();
    int nextDepth = thisCounts ? depth  + 1 : depth;
    if (poff != 0) {
-      tuple = makeFullnameR( die.getUnit()->offsetToDIE( poff ), nextDepth );
+      tuple = makeFullnameR( die.getUnit()->offsetToDIE( Dwarf::DIE(), poff ), nextDepth );
    } else {
       tuple = PyTuple_New( nextDepth );
    }
@@ -546,12 +546,6 @@ unit_purge( PyObject * self, PyObject * args ) {
    Py_RETURN_NONE;
 }
 
-static PyObject *
-unit_dieCount( PyObject * self, PyObject * args ) {
-   PyDwarfUnit * unit = ( PyDwarfUnit * )self;
-   return PyLong_FromLong( unit->unit->entryCount() );
-}
-
 static Dwarf::ImageCache imageCache;
 
 static PyObject *
@@ -622,7 +616,7 @@ elf_dynnames( PyObject * self, PyObject * args ) {
       auto dynsyms = obj->dynamicSymbols();
       // First, create mapping from addr to list-of-dynamic-name
       if (dynsyms) {
-         for ( const auto sym : *dynsyms ) {
+         for ( const auto & sym : *dynsyms ) {
             if ( sym.symbol.st_shndx == SHN_UNDEF )
                continue;
             if ( sym.isHidden() )
@@ -1040,7 +1034,6 @@ static PyMethodDef units_methods[] = { { 0, 0, 0, 0 } };
 static PyMethodDef unit_methods[] = {
    { "root", unit_root, METH_VARARGS, "get root DIE of a unit" },
    { "purge", unit_purge, METH_VARARGS, "purge any memory used by DIE trees" },
-   { "dieCount", unit_dieCount, METH_VARARGS, "get total number of DIEs in unit" },
    { "macros", unit_macros, METH_VARARGS, "walk the macros for a unit" },
    { 0, 0, 0, 0 }
 };
