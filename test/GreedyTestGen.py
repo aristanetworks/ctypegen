@@ -41,6 +41,16 @@ assert f[ 0 ].g[ 0 ].inputx3 == 42 * 3
 assert f[ 0 ].g[ 0 ].inputx4 == 42 * 4
 assert module.Globals( dll ).global42.value == 42
 
+# Check that our two packed structures are properly detected as being packed.
+
+# We are testing for the _pack_ field directly, so pylint: disable=protected-access
+assert module.PackedStructWithEndPadding._pack_ == 1
+assert module.PackedStructWithInternalPadding._pack_ == 1
+# pylint: enable=protected-access
+
+# ... and that one of our non-packed structures has no "pack" flag.
+assert not hasattr( module.g, "_pack_" )
+
 classWithMethods = module.LookInside_cn_cn_ClassWithMethods()
 classWithMethods.field1 = 42
 classWithMethods.field2 = 24

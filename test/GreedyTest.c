@@ -27,7 +27,22 @@ struct f {
    struct g * g;
 };
 
+struct PackedStructWithInternalPadding {
+   int a;
+   char b;
+   int c;
+} __attribute__((packed));
+
+struct PackedStructWithEndPadding {
+   int a;
+   int b;
+   char c;
+} __attribute__((packed));
+
 int global42 = 42;
+
+struct PackedStructWithEndPadding packedStructWithEndPadding;
+struct PackedStructWithInternalPadding packedStructWithInternalPadding;
 
 struct f *
 create_f( int input ) {

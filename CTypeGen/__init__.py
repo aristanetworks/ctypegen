@@ -141,6 +141,10 @@ class Type( object ):
          "resolver", "die", "_name", "spec", "defdie", "defined", "declared"
    ]
 
+   def alignment( self ):
+      base = self.baseType()
+      return base.alignment() if base else 1
+
    def namePrefix( self ):
       return ""
 
@@ -395,7 +399,10 @@ def die_bit_offset( die ):
 
 class MemberType( Type ):
    ''' A struct, class  or union type - anything that has fields. '''
-   __slots__ = [ "members", "anonMembers" ]
+   __slots__ = [ "members", "anonMembers", "alignment_" ]
+
+   def alignment( self ):
+      return self.alignment_
 
    def __init__( self, resolver, die ):
       ''' MemberTypes can accept fieldHints - these are the names of types to
@@ -406,6 +413,7 @@ class MemberType( Type ):
       super( MemberType, self ).__init__( resolver, die )
       self.members = []
       self.anonMembers = set()
+      self.alignment_ = 0
 
    def findMembers( self ):
       if self.members:
@@ -565,10 +573,7 @@ class MemberType( Type ):
       out.write( u' ):\n' )
       if self.dieComment():
          out.write( u"   %s\n" % self.dieComment() )
-      if self.spec and self.spec.pack:
-         out.write( u"   _pack_ = 1\n" )
-      else:
-         out.write( u"   pass\n" )
+      out.write( u"   pass\n" )
       out.write( u'\n' )
 
    def define( self, out ):
@@ -594,44 +599,97 @@ class MemberType( Type ):
       if unaligned:
          out.write( u"%s.allow_unaligned = %s\n" % ( self.pyName(), unaligned ) )
 
+      self.alignment_ = 1
+      packComment = ""
+
       # quoting the 'p' below stops pylint gagging on this file.
       if self.members:
-         out.write( u"%s._fields_ = [ # \x70ylint: disable=protected-access\n" %
+         # We must set _pack_ before _fields_, because due to a limitation of ctypes,
+         # so accumulate fields in _fields_pre, first as we calculate what to do
+         # about packing.
+
+         out.write( u"%s._fields_pre = [ # \x70ylint: disable=protected-access\n" %
                self.pyName() )
+
+         packed = False
+
          for memnum, member in enumerate( self.members ):
-            # First make sure we actually have a proper definition of the type
-            # for this field. For example, clang++ will not generate the debug
-            # info for std::string by default, and we are left with an
-            # incomplete type for strings. ctypes has no way of directly
-            # controlling the offset for a field, so we need to give the field
-            # a type of the correct size, at least - if we don't find a
-            # definition for the field's type, then we just make it an array
-            # of characters of the appropriate size.
+            fieldOffset = member.die.DW_AT_data_member_location # might be None
+
+            # Make sure we actually have a proper definition of the type for
+            # this field. For example, clang++ will not generate the debug info
+            # for std::string by default, and we are left with an incomplete
+            # type for strings. ctypes has no way of directly controlling the
+            # offset for a field, so we need to give the field a type of the
+            # correct size, at least - if we don't find a definition for the
+            # field's type, then we just make it an array of characters of the
+            # appropriate size.
             if not member.type().defined:
-               myOffset = member.die.DW_AT_data_member_location or 0
+               fieldAlignment = 1
                if memnum + 1 < len( self.members ):
                   nextOffset = self.members[ memnum + 1 ].die. \
                           DW_AT_data_member_location
-                  size = nextOffset - myOffset
+                  size = nextOffset - ( fieldOffset or 0 )
                else:
-                  size = self.die.DW_AT_byte_size - myOffset
+                  size = self.die.DW_AT_byte_size - ( fieldOffset or 0 )
                typstr = "c_char * %d" % size
                self.resolver.errorfunc(
                      "padded %s:%s (no definition for %s)" % (
                         self.name( withTag=False ), member.name(),
                         member.type().name() ) )
-
             else:
+               fieldAlignment = member.type().alignment()
                typstr = member.ctype()
+
+            # The alignment of this structure/union is the same as the "most
+            # aligned" member.
+            if fieldAlignment > self.alignment_:
+               assert fieldAlignment % self.alignment_ == 0
+               self.alignment_ = fieldAlignment
+
             if member.bit_size():
+               # we have a bitfield, then print out any padding, and the field itself
                for idx, padding in enumerate( member.pre_pads ):
                   out.write( u"   ( \"%s\", %s, %d ),\n" %
                      ( "%s_prepad_%d" % ( member.pyName(), idx ), typstr, padding ) )
                out.write( u"   ( \"%s\", %s, %d ),\n" %
                      ( member.pyName(), typstr, member.bit_size() ) )
             else:
+               # Regular, non-bitfield member.
                out.write( u"   ( \"%s\", %s ),\n" % ( member.name(), typstr ) )
+
+            # If this field looks unaligned, then the entire type is "packed".
+            if fieldOffset is not None and fieldAlignment and not packed and \
+                  fieldOffset % fieldAlignment != 0:
+               packed=True
+               packComment = "field %s, required alignment %d, offset %d" % (
+                       member.name(), fieldAlignment, fieldOffset )
+
          out.write( u"]\n" )
+
+         # If the size of the entire object is not a multiple of the alignment
+         # we calculated the type must be packed.
+         sz = self.definition().DW_AT_byte_size
+         if not packed and sz is not None and sz % self.alignment_ != 0:
+            packed=True
+            packComment = "total size %d, field alignment requirement %d" % (
+                    sz, self.alignment_ )
+
+         if not packed and self.spec and self.spec.pack:
+            packed=True
+            packComment = "explicitly requested by type hint"
+
+         # If this type is packed, then let ctypes know, and set its alignment
+         # to 1, because packed types don't need to be aligned in structures.
+         if packed:
+            out.write( u"%s._pack_ = 1 # %s\n" % ( self.pyName(), packComment ) )
+            self.alignment_ = 1
+
+         # Now that we've worked out what to do with the "pack" field, we can
+         # finally assign to the type's _fields_
+         out.write( u"%s._fields_ = %s._fields_pre\n" %
+               ( self.pyName(), self.pyName() ) )
+
       if self.anonMembers:
          out.write( u"%s._anonymous_ = (\n" % self.pyName() )
          for field in sorted( self.anonMembers ):
@@ -748,34 +806,47 @@ class EnumType( Type ):
       primitive = self.resolver.dieToType( self.definition().DW_AT_type )
       return primitive.pyName()
 
+def _align( _32, _64 ):
+   return _32 if ctypes.sizeof( ctypes.c_void_p ) == 4 else _64
 class PrimitiveType( Type ):
-   ''' Primitive types from DWARF/C: map to a python ctype primitive '''
-   __slots__ = []
+   ''' Primitive types from DWARF/C: key is the C name. value is a tuple.
+   The tuple contains the name of the ctypes equivalent type, the alignment of
+   that type.
+   '''
+   _slots__ = []
+
+
    baseTypes = {
-         u"long long unsigned int" : u"c_ulonglong",
-         u"long long int" : u"c_longlong",
-         u"long unsigned int" : u"c_ulong",
-         u"short unsigned int" : u"c_ushort",
-         u"unsigned short" : u"c_ushort",
-         u"unsigned int" : u"c_uint",
-         u"unsigned char" : u"c_ubyte",
-         u"char16_t" : u"c_short",
-         u"signed char" : u"c_byte",
-         u"char" : u"c_char",
-         u"long int" : u"c_long",
-         u"int" : u"c_int",
-         u"short int" : u"c_short",
-         u"short" : u"c_short",
-         u"float" : u"c_float",
-         u"_Bool" : u"c_bool",
-         u"bool" : u"c_bool",
-         u"double" : u"c_double",
-         u"long double" : u"c_longdouble",
-         u"_Float128" : u"c_longdouble",
-         u"__float128" : u"c_longdouble",
-         u"__int128" : u"(c_longlong * 2)",
-         u"wchar_t" : u"c_wchar",
+         u"long long unsigned int" : ( u"c_ulonglong", _align(4, 8) ),
+         u"long long int" : ( u"c_longlong", _align(4, 8) ),
+         u"long unsigned int" : ( u"c_ulong", _align(4, 8) ),
+         u"short unsigned int" : ( u"c_ushort", _align( 2, 2 ) ),
+         u"unsigned short" : ( u"c_ushort", _align( 2, 2 ) ),
+         u"unsigned int" : ( u"c_uint", _align( 4, 4 ) ),
+         u"unsigned char" : ( u"c_ubyte", _align( 1, 1 ) ),
+         u"char16_t" : ( u"c_short", _align( 2, 2 ) ),
+         u"signed char" : ( u"c_byte", _align( 1, 1 ) ),
+         u"char" : ( u"c_char", _align( 1, 1 ) ),
+         u"long int" : ( u"c_long", _align( 4, 8 ) ),
+         u"int" : ( u"c_int", _align( 4, 4 ) ),
+         u"short int" : ( u"c_short", _align( 2, 2 ) ),
+         u"short" : ( u"c_short", _align( 2, 2 ) ),
+         u"float" : ( u"c_float", _align( 4, 4 ) ),
+         u"_Bool" : ( u"c_bool", _align( 1, 1 ) ),
+         u"bool" : ( u"c_bool", _align( 1, 1 ) ),
+         u"double" : ( u"c_double", _align( 4, 8 ) ),
+         u"long double" : ( u"c_longdouble", _align( 4, 16 ) ),
+         u"_Float128" : ( u"c_longdouble", _align( 16, 16 ) ),
+         u"__float128" : ( u"c_longdouble", _align( 16, 16 ) ),
+         u"__int128" : ( u"(c_longlong * 2)", _align( -1, 16 ) ),
+         u"wchar_t" : ( u"c_wchar", _align( 4, 4 ) ),
    }
+
+   def alignment( self ):
+      name = self.die.DW_AT_name
+      if not name in PrimitiveType.baseTypes:
+         raise Exception( "no python ctype for primitive C type %s" % name )
+      return PrimitiveType.baseTypes[ name ][ 1 ]
 
    def name( self, withTag=True ):
       return self.ctype()
@@ -784,7 +855,7 @@ class PrimitiveType( Type ):
       name = self.die.DW_AT_name
       if not name in PrimitiveType.baseTypes:
          raise Exception( "no python ctype for primitive C type %s" % name )
-      return PrimitiveType.baseTypes[ name ]
+      return PrimitiveType.baseTypes[ name ][ 0 ]
 
 class ArrayType( Type ):
    __slots__ = [ "dimensions" ]
@@ -819,6 +890,9 @@ class ArrayType( Type ):
 
 class PointerType( Type ):
    __slots__ = []
+
+   def alignment( self ):
+      return ctypes.sizeof( ctypes.c_void_p )
 
    def declare( self, out ):
       self.resolver.declareType( self.baseType(), out )
