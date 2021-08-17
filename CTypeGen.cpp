@@ -1128,7 +1128,6 @@ initlibCTypeGen( void )
    elfObjectType.tp_methods = elf_methods;
    elfObjectType.tp_doc = "ELF object";
    elfObjectType.tp_dealloc = elf_free;
-   elfObjectType.tp_new = PyType_GenericNew;
 
    unitsType.tp_name = "libCTypeGen.UnitsCollection";
    unitsType.tp_flags = Py_TPFLAGS_DEFAULT;
@@ -1136,14 +1135,12 @@ initlibCTypeGen( void )
    unitsType.tp_methods = units_methods;
    unitsType.tp_doc = "ELF object's DWARF units";
    unitsType.tp_dealloc = units_free;
-   unitsType.tp_new = PyType_GenericNew;
    unitsType.tp_iter = units_iterator;
 
    unitsIteratorType.tp_name = "libCTypeGen.UnitsIterator";
    unitsIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;
    unitsIteratorType.tp_basicsize = sizeof( PyDwarfUnitIterator );
    unitsIteratorType.tp_doc = "ELF object's DWARF units iterator";
-   unitsIteratorType.tp_new = PyType_GenericNew;
    unitsIteratorType.tp_methods = unititer_methods;
    unitsIteratorType.tp_iternext = unititer_next;
    unitsIteratorType.tp_dealloc = unititer_free;
@@ -1153,7 +1150,6 @@ initlibCTypeGen( void )
    dwarfEntryType.tp_basicsize = sizeof( PyDwarfEntry );
    dwarfEntryType.tp_doc = "DWARF DIE object";
    dwarfEntryType.tp_dealloc = entry_free;
-   dwarfEntryType.tp_new = PyType_GenericNew;
    dwarfEntryType.tp_getattro = entry_getattr;
    dwarfEntryType.tp_methods = entry_methods;
    dwarfEntryType.tp_iter = entry_iterator;
@@ -1166,7 +1162,6 @@ initlibCTypeGen( void )
    unitType.tp_basicsize = sizeof( PyDwarfUnit );
    unitType.tp_doc = "DWARF Unit object";
    unitType.tp_dealloc = unit_free;
-   unitType.tp_new = PyType_GenericNew;
    unitType.tp_methods = unit_methods;
    unitType.tp_richcompare = unit_compare;
 
@@ -1175,7 +1170,6 @@ initlibCTypeGen( void )
    dwarfEntryIteratorType.tp_basicsize = sizeof( PyDwarfEntryIterator );
    dwarfEntryIteratorType.tp_doc = "DWARF DIE object iterator";
    dwarfEntryIteratorType.tp_dealloc = entryiter_free;
-   dwarfEntryIteratorType.tp_new = PyType_GenericNew;
    dwarfEntryIteratorType.tp_iter = entryiter_iter;
    dwarfEntryIteratorType.tp_iternext = entryiter_iternext;
 
