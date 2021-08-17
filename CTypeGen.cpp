@@ -556,6 +556,12 @@ elf_open( PyObject * self, PyObject * args ) {
       if ( !PyArg_ParseTuple( args, "s#", &image, &imagelen ) )
          return nullptr;
       auto dwarf = imageCache.getDwarf( image );
+      auto &it = openFiles[ dwarf.get()];
+      if ( it != nullptr ) {
+         // We already have a handle on this file - return the existing object.
+         Py_INCREF( it );
+         return (PyObject *)it;
+      }
       auto obj = dwarf->elf;
       PyElfObject * val = PyObject_New( PyElfObject, &elfObjectType );
       new ( &val->obj ) std::shared_ptr< Elf::Object >( obj );
@@ -568,7 +574,7 @@ elf_open( PyObject * self, PyObject * args ) {
       // a DW_AT_linker_name to an address, and from there to a list of candidate
       // dynamic symbols at that address. They don't always match up, because of
       // aliases, weak bindings, etc.
-      openFiles[ dwarf.get() ] = val;
+      it = val;
       val->fileId = nextFileId++;
       return ( PyObject * )val;
    } catch ( const std::exception & ex ) {
