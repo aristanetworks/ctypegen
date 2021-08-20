@@ -138,8 +138,11 @@ class Type( object ):
    for structures, unions, functions, etc'''
 
    __slots__ = [
-         "resolver", "die", "_name", "spec", "defdie", "defined", "declared"
+         "resolver", "die", "_name", "defdie", "defined", "declared"
    ]
+
+   def __lt__( self, rhs ):
+      return self.die.fullname() < rhs.die.fullname()
 
    def alignment( self ):
       base = self.baseType()
@@ -151,7 +154,6 @@ class Type( object ):
    def __init__( self, resolver, die ):
       self.resolver = resolver
       self._name = "::".join( die.fullname() ) if die else "void"
-      self.spec = None
       self.die = die
       self.defdie = None
       self.defined = False
@@ -174,7 +176,7 @@ class Type( object ):
       return self.defdie
 
    def applyHints( self, spec ):
-      self.spec = spec
+      pass
 
    def dieComment( self ):
       if self.pyName() == self.name():
@@ -399,7 +401,16 @@ def die_bit_offset( die ):
 
 class MemberType( Type ):
    ''' A struct, class  or union type - anything that has fields. '''
-   __slots__ = [ "members", "anonMembers", "alignment_" ]
+   __slots__ = [
+
+           "alignment_",
+           "anonMembers",
+           "base",
+           "members",
+           "mixins",
+           "packed",
+
+           ]
 
    def alignment( self ):
       return self.alignment_
@@ -414,6 +425,9 @@ class MemberType( Type ):
       self.members = []
       self.anonMembers = set()
       self.alignment_ = 0
+      self.base = self.ctype_subclass()
+      self.mixins = []
+      self.packed = False
 
    def findMembers( self ):
       if self.members:
@@ -508,13 +522,16 @@ class MemberType( Type ):
                                      ( field.name(), field.tag(), self.name() ) )
 
    def applyHints( self, spec ):
-      ''' For fields with anonymous types, provide python names as hinted by caller
-      '''
       super( MemberType, self ).applyHints( spec )
       self.findMembers()
-      fieldHints = spec.fieldHints
-      if fieldHints is None:
-         return
+      fieldHints = spec.fieldHints or []
+
+      self.packed = spec.pack
+      if spec.base is not None:
+         self.base = spec.base
+      if spec.mixins is not None:
+         self.mixins = spec.mixins
+
       for member in self.members:
          if member.name() in fieldHints:
             hint = fieldHints[ member.name() ]
@@ -531,13 +548,9 @@ class MemberType( Type ):
                memberTypeDIE = member.die.DW_AT_type
                typ = self.resolver.dieToType( memberTypeDIE )
 
-               # Now that we have a DIE name for the hint, we can register it with
-               # the resolver's typeHints. This is to give it a customized name
-               # later
-               self.resolver.typeHints[ memberTypeDIE.fullname() ] = typedesc
-
-               # Apply the hints now, recursively.
-               typ.applyHints( typedesc )
+               # Now that we have a DIE name for the hint, we can register it
+               # with the resolver to have hints applied later.
+               self.resolver.applyHintToType( typedesc, typ )
 
             # Provide an alternative name for a field in a struct.
             if hint.name:
@@ -558,18 +571,14 @@ class MemberType( Type ):
       ''' Declare a structure - we don't need to know the fields to
       declare it (think forward reference) '''
 
-      base = self.ctype_subclass() if self.spec is None or self.spec.base is None \
-            else self.spec.base
-
       out.write( u'\n' )
       # TestableCtypeClass is a mixin defined in CTypeGenRun, and
       # provides methods on the # generated class to do some consistency
       # checking. The generated code will perform these tests if run as
       # a stand-alone program.
-      out.write( u'class %s( %s, TestableCtypeClass' % ( self.pyName(), base ) )
-      if self.spec and self.spec.mixins:
-         for mixin in self.spec.mixins:
-            out.write( ', %s' % mixin )
+      out.write( u'class %s( %s, TestableCtypeClass' % ( self.pyName(), self.base ) )
+      for mixin in self.mixins:
+         out.write( ', %s' % mixin )
       out.write( u' ):\n' )
       if self.dieComment():
          out.write( u"   %s\n" % self.dieComment() )
@@ -600,7 +609,7 @@ class MemberType( Type ):
          out.write( u"%s.allow_unaligned = %s\n" % ( self.pyName(), unaligned ) )
 
       self.alignment_ = 1
-      packComment = ""
+      packComment = "explicitly requested by type hint"
 
       # quoting the 'p' below stops pylint gagging on this file.
       if self.members:
@@ -610,8 +619,6 @@ class MemberType( Type ):
 
          out.write( u"%s._fields_pre = [ # \x70ylint: disable=protected-access\n" %
                self.pyName() )
-
-         packed = False
 
          for memnum, member in enumerate( self.members ):
             fieldOffset = member.die.DW_AT_data_member_location # might be None
@@ -659,9 +666,9 @@ class MemberType( Type ):
                out.write( u"   ( \"%s\", %s ),\n" % ( member.name(), typstr ) )
 
             # If this field looks unaligned, then the entire type is "packed".
-            if fieldOffset is not None and fieldAlignment and not packed and \
+            if fieldOffset is not None and fieldAlignment and not self.packed and \
                   fieldOffset % fieldAlignment != 0:
-               packed=True
+               self.packed=True
                packComment = "field %s, required alignment %d, offset %d" % (
                        member.name(), fieldAlignment, fieldOffset )
 
@@ -670,18 +677,14 @@ class MemberType( Type ):
          # If the size of the entire object is not a multiple of the alignment
          # we calculated the type must be packed.
          sz = self.definition().DW_AT_byte_size
-         if not packed and sz is not None and sz % self.alignment_ != 0:
-            packed=True
+         if not self.packed and sz is not None and sz % self.alignment_ != 0:
+            self.packed=True
             packComment = "total size %d, field alignment requirement %d" % (
                     sz, self.alignment_ )
 
-         if not packed and self.spec and self.spec.pack:
-            packed=True
-            packComment = "explicitly requested by type hint"
-
          # If this type is packed, then let ctypes know, and set its alignment
          # to 1, because packed types don't need to be aligned in structures.
-         if packed:
+         if self.packed:
             out.write( u"%s._pack_ = 1 # %s\n" % ( self.pyName(), packComment ) )
             self.alignment_ = 1
 
@@ -764,7 +767,15 @@ class UnionType( MemberType ):
       return True
 
 class EnumType( Type ):
-   __slots__ = []
+   __slots__ = [ "nameless" ]
+
+   def __init__( self, resolver, die  ):
+      super( EnumType, self ).__init__( resolver, die )
+      self.nameless = self.resolver.namelessEnums
+
+   def applyHints( self, spec ):
+      if spec.nameless_enum is not None:
+         self.nameless = spec.nameless_enum
 
    def namePrefix( self ):
       return "enum_"
@@ -774,13 +785,9 @@ class EnumType( Type ):
       if rtype:
          self.resolver.defineType( rtype, out )
       indent = ''
-      if self.spec and ( self.spec.nameless_enum is not None ):
-         nameless = self.spec.nameless_enum
-      else:
-         nameless = self.resolver.namelessEnums
 
       out.write( u"class %s( %s ):\n" % ( self.pyName(), self.intType() ) )
-      if not nameless:
+      if not self.nameless:
          indent = pad( 3 )
       else:
          out.write( u'%spass\n\n' % pad( 3 ) )
@@ -945,7 +952,7 @@ class Typedef( Type ):
    def define( self, out ):
       # a typedef may be defined on a declared type, and the declared type
       # may then use the typedef in its definition.
-      # We must there fore declare the base type first, then declare ourselves,
+      # We must therefore declare the base type first, then declare ourselves,
       # then define the base type, so our declaration is available while defining
       # the base type.
       self.resolver.declareType( self.baseType(), out )
@@ -1035,23 +1042,24 @@ class TypeResolver( object ):
 
    __slots__ = [
 
-         "deepInspect",
-         "defineTypes",
-         "dwarves",
-         "errorfunc",
-         "errors",
-         "existingTypes",
-         "functions",
-         "functionsFilter",
-         "globalsFilter",
-         "namelessEnums",
-         "namespaceFilter",
-         "pkgname",
-         "producers",
-         "typeHints",
-         "types",
-         "typesFilter",
-         "variables",
+         "allHintedTypes",    # any type with a hint - used to create alias names
+         "applyHints",        # types we need to apply hints to map from type to hint
+         "deepInspect",       # we wish to agressively find types through pointers
+         "defineTypes",       # Types we want to define.
+         "dwarves",           # The DWARF objects we want to search
+         "errorfunc",         # function to call if there's an error
+         "errors",            # Errors generated by default error function
+         "existingTypes",     # Set of existing CTypegen-generated modules to search
+         "functions",         # Functions we've found
+         "functionsFilter",   # called to check if we should render a function
+         "globalsFilter",     # called to check if we should render a global variable
+         "namelessEnums",     # Enum values should not be enclosed in their own class
+         "namespaceFilter",   # Called to determine if we should explore a namespace
+         "pkgname",           # The name of the package we generate.
+         "producers",         # list of distinct producers that contribute to DWARF
+         "types",             # All the types we have found
+         "typesFilter",       # called to see if we should render a type
+         "variables",         # All the variables we want to render
 
    ]
 
@@ -1063,14 +1071,15 @@ class TypeResolver( object ):
       self.types = {} # index by DIE fullname, then tag.
       self.variables = {} # index by DIE fullname
       self.functions = {} # index by DIE fullname
-      self.defineTypes = set() # Types we want to define.
+      self.defineTypes = set()
 
       self.pkgname = None
       self.existingTypes = existingTypes if existingTypes else []
       self.errorfunc = errorfunc if errorfunc else self.error
       self.errors = 0
       self.producers = set()
-      self.typeHints = {}
+      self.applyHints = {}
+      self.allHintedTypes = {}
 
       allNamespaces = set()
 
@@ -1084,6 +1093,8 @@ class TypeResolver( object ):
       # from the start we don't care about.
       wildcardNamespace = False
 
+      hintsByTypename = {}
+
       if callable( typeHints ):
          self.typesFilter = typeHints
          wildcardNamespace = True
@@ -1092,10 +1103,10 @@ class TypeResolver( object ):
             if not isinstance( hint, PythonType ):
                hint = PythonType( hint )
             name = tuple( hint.cName.split( "::" ) )
-            self.typeHints[ name ] = hint
+            hintsByTypename[ name ] = hint
             addNamespace( name )
 
-         self.typesFilter = lambda die: die.fullname() in self.typeHints
+         self.typesFilter = lambda die: die.fullname() in hintsByTypename
 
       self.deepInspect = deepInspect
       self.namelessEnums = namelessEnums
@@ -1138,26 +1149,35 @@ class TypeResolver( object ):
          else:
             self.namespaceFilter = lambda die: die.fullname() in allNamespaces
 
-      try:
-         for dwarf in self.dwarves:
-            for u in dwarf.units():
-               self.enumerateDIEs( u.root(), self.examineDIE )
-      except StopIteration:
-         pass
+      for dwarf in self.dwarves:
+         for u in dwarf.units():
+            self.enumerateDIEs( u.root(), self.examineDIE )
 
-      # We should now have DIEs for everything we care about. Go through and apply
-      # hints. We may grab extra types from hints as we apply them - this happens
-      # for fields where we don't know the type up front (eg, anon structures).
-      # We apply the hints recursively, so we don't need to iterate over the list
-      # repeatedly, but we do need to copy the items iterator.
-      for name, hint in list( self.typeHints.items() ):
+      # We should now have DIEs for everything we care about. For hints the
+      # user has given by type name, find the appropriate type for the hint,
+      # and register the fact we need to apply that hint to that type.  The
+      # same has already been done for a type filter function that returns a
+      # PythonType object.
+      for name, hint in hintsByTypename.items():
          types = self.types.get( name )
          if types:
             for tag, typ in types.items():
                if hint.elements is None or tag in hint.elements:
-                  typ.applyHints( hint )
+                  self.applyHintToType( hint, typ )
          else:
             self.errorfunc( "no type found for %s" % hint.cName )
+
+      # Iterate over all hints that need to be applied
+      # For things like anonymous structures where the hint provides a nested
+      # hint for a field, we may register more hints to apply, so we repeat the
+      # process until an iteration provides no more work to do.
+      while True:
+         toApply = self.applyHints
+         if not toApply:
+            break
+         self.applyHints = {}
+         for typ, hint in toApply.items():
+            typ.applyHints( hint )
 
    # These are the named types we can generate definitions for
    typeDieTags = (
@@ -1201,6 +1221,10 @@ class TypeResolver( object ):
       newType = typeFromTag[ die.tag() ]( self, die )
       bytag[ tag ] = newType
       return newType
+
+   def applyHintToType( self, hint, typ ):
+      self.allHintedTypes[ typ ] = hint
+      self.applyHints[ typ ] = hint
 
    def declareType( self, typ, out ):
       ''' Idempotent wrapper for Type.declare '''
@@ -1262,8 +1286,12 @@ class TypeResolver( object ):
          return False
 
       if tag in TypeResolver.typeDieTags:
-         if self.typesFilter( die ):
-            self.defineTypes.add( self.dieToType( die ) )
+         res = self.typesFilter( die )
+         if res:
+            typ = self.dieToType( die )
+            if isinstance( res, PythonType ):
+               self.applyHintToType( res, typ )
+            self.defineTypes.add( typ )
          # Type DIEs are also namespaces - deal with namespaces for return
          # below.
 
@@ -1326,14 +1354,9 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       # add an assignment to make them equivalent. This happens for types
       # defined in other, existing, modules too, so we can give them names in
       # this module.
-      for name, hint in sorted( self.typeHints.items() ):
-         types = self.types.get( name )
-         if not types:
-            continue # We've already warned about missing types.
-         for tag, typ in types.items():
-            if ( hint.elements is None or tag in hint.elements ) \
-                     and hint.pythonName != typ.ctype():
-               stream.write( u'%s = %s\n' % ( hint.pythonName, typ.ctype() ) )
+      for typ, hint in sorted( self.allHintedTypes.items() ):
+         if hint.pythonName != typ.ctype():
+            stream.write( u'%s = %s\n' % ( hint.pythonName, typ.ctype() ) )
 
       # If tagged types don't conflict with untagged, we can make aliases without
       # the tag prefix
@@ -1403,11 +1426,20 @@ class Hint( object ):
       self.allowUnaligned = allowUnaligned
 
 class PythonType( object ):
-   ''' Descriptor for types that caller wants rendered in the output '''
+   ''' Hints for a type the user wants rendered '''
 
    __slots__ = [
-         "pythonName", "cName", "fieldHints", "pack", "base", "mixins",
-         "nameless_enum", "elements"
+
+         "base",          # name for the class's base type (instead of
+                          # ctypes.Structure, for example)
+         "cName",         # name of the C type to find.
+         "elements",      # set of DIE tags this applies to (eg,  DW_TAG_structure )
+         "fieldHints",    # hints to recursively apply to member fields
+         "mixins",        # extra base classes to add to the class definition
+         "nameless_enum", # don't put enum values in their own class
+         "pack",          # pack this structure.
+         "pythonName",    # The name to assign this type in python.
+
          ]
 
    def __init__( self, pythonName, cName=None, base=None, pack=False,
@@ -1600,7 +1632,7 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
          content.write( "# (end Macro definitions)\n\n" )
 
       content.write( "CTYPEGEN_producers__ = {\n" )
-      for p in resolver.producers:
+      for p in sorted( resolver.producers ):
          content.write( "\t\"%s\",\n" % p )
       content.write( "}\n" )
 
