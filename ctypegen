@@ -13,6 +13,7 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
+from __future__ import absolute_import, division, print_function
 import CTypeGen
 import argparse
 
@@ -24,8 +25,15 @@ def main():
                     help="libraries to process", required=True )
    ap.add_argument( "-m", "--modname", metavar="module-name", type=str,
                     help="name for python module", required=False )
+   ap.add_argument( "-M", "--macros", default=False, action='store_true',
+                    help="include mappings for basic macros" )
+   ap.add_argument( "-c", "--nameless-enums", default=False, action='store_true',
+                    help="use 'nameless enums'" )
    res = ap.parse_args()
-   CTypeGen.generateAll( res.input, res.output, modname=res.modname )
+
+   CTypeGen.generateAll( res.input, res.output, modname=res.modname,
+                         namelessEnums=res.nameless_enums,
+                         macroFiles=( lambda fname: True ) if res.macros else None )
 
 if __name__ == "__main__":
    main()

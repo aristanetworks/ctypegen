@@ -1524,7 +1524,8 @@ def generate( libnames, outname, types, functions, header=None, modname=None,
                          errorfunc, globalVars, deepInspect, namelessEnums,
                          namespaceFilter, macroFiles, trailer )
 
-def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None ):
+def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
+                 namelessEnums=False ):
    ''' Simplified "generate" that will generate code for all types, functions,
    and variables in a library '''
    dwarves = getDwarves( libs )
@@ -1536,12 +1537,13 @@ def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None ):
       return any( [ name in dwarf.dynnames() for dwarf in dwarves ] )
    return generateDwarf( dwarves, outname, types=lambda die: True,
          functions=allExterns, globalVars=allExterns, modname=modname,
-         macroFiles=macroFiles, trailer=trailer )
+         macroFiles=macroFiles, trailer=trailer, namelessEnums=namelessEnums )
 
 class MacroCallback( object ):
    def __init__( self, output, interested ):
       self.filescope = []
-      self.interested = interested
+      self.interested = interested if callable( interested ) \
+                        else lambda f : f in interested
       self.defining = 0
       self.output = output
       self.output.write( "# Macro definitions:\n" )
@@ -1586,12 +1588,12 @@ class MacroCallback( object ):
 
    def startFile( self, line, dirname, filename ):
       self.filescope.append( ( dirname, filename ) )
-      if filename in self.interested:
+      if self.interested( filename ):
          self.defining += 1
 
    def endFile( self ):
       ( _, filename ) = self.filescope.pop()
-      if filename in self.interested:
+      if self.interested( filename ):
          self.defining -= 1
 
 def generateDwarf( binaries, outname, types, functions, header=None, modname=None,
