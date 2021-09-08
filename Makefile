@@ -28,7 +28,7 @@ test:
 	echo "$(PYTHONPATH)"
 	PYTHONPATH=$(PYTHONPATH) make -C test
 
-dbghelper.o: CFLAGS=-O0 -g -fPIC
+dbghelper.o: CFLAGS=-O0 -g -fPIC -fno-eliminate-unused-debug-types -g3
 libdbghelper.so: dbghelper.o
 	$(CC) -g --shared -o $@ $^
 
