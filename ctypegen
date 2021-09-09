@@ -12,10 +12,11 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-
 from __future__ import absolute_import, division, print_function
+
 import CTypeGen
 import argparse
+import importlib
 
 def main():
    ap = argparse.ArgumentParser( description="Generate python from debug info" )
@@ -29,11 +30,21 @@ def main():
                     help="include mappings for basic macros" )
    ap.add_argument( "-c", "--nameless-enums", default=False, action='store_true',
                     help="use 'nameless enums'" )
+   ap.add_argument( "-S", "--skip-types", nargs="+", help="types to skip",
+         default=[] )
+   ap.add_argument( "-U", "--use-modules", nargs="+",
+         help="existing python modules to import and find definitions in",
+         default=[] )
    res = ap.parse_args()
 
-   CTypeGen.generateAll( res.input, res.output, modname=res.modname,
+   existingTypes= [ importlib.import_module( mod ) for mod in res.use_modules ]
+   CTypeGen.generateAll( res.input,
+                         res.output,
+                         modname=res.modname,
                          namelessEnums=res.nameless_enums,
-                         macroFiles=( lambda fname: True ) if res.macros else None )
+                         macroFiles=( lambda fname: True ) if res.macros else None,
+                         skipTypes=res.skip_types,
+                         existingTypes=existingTypes )
 
 if __name__ == "__main__":
    main()

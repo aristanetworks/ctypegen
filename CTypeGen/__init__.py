@@ -116,6 +116,20 @@ def pad( indent ):
    formatting'''
    return u"".ljust( indent )
 
+tagPrefixes = {
+      tags.DW_TAG_structure_type: "struct_",
+      tags.DW_TAG_union_type: "union_",
+      tags.DW_TAG_enumeration_type: "enum_",
+      }
+
+def flatName( die, withTag=True ):
+   ''' A DIE's "flatname" is just the concatenation of its name and enclosed
+   scopes with "::", similar to the C++ name. We also give tagged types a
+   prefix, like "struct_", to disambiguate them from non-tagged types. Eg: a
+   typedef and a struct can have different types, but the same name. '''
+   tagPrefix = tagPrefixes.get( die.tag(), "" ) if withTag else ""
+   return "%s%s" % ( tagPrefix, "::".join( die.fullname() ) )
+
 def deref( die ):
    ''' Remove any CV-qualifiers and dereference any typedefs from a DIE until
    we get down to its unqualified, non-typedef'd type
@@ -138,7 +152,7 @@ class Type( object ):
    for structures, unions, functions, etc'''
 
    __slots__ = [
-         "resolver", "die", "_name", "defdie", "defined", "declared"
+         "resolver", "die", "defdie", "defined", "declared"
    ]
 
    def __lt__( self, rhs ):
@@ -148,12 +162,8 @@ class Type( object ):
       base = self.baseType()
       return base.alignment() if base else 1
 
-   def namePrefix( self ):
-      return ""
-
    def __init__( self, resolver, die ):
       self.resolver = resolver
-      self._name = "::".join( die.fullname() ) if die else "void"
       self.die = die
       self.defdie = None
       self.defined = False
@@ -209,15 +219,8 @@ class Type( object ):
       ''' The size of the type, as reported via DWARF '''
       return self.definition().DW_AT_byte_size
 
-   def hasName( self ):
-      return self._name is not None
-
    def name( self, withTag=True ):
-      assert self._name
-      if self.resolver.pkgname is not None:
-         return u'%s.%s%s' % ( self.resolver.pkgname,
-               self.namePrefix() if withTag else "" , self._name )
-      return "%s%s" % ( self.namePrefix() if withTag else "", self._name )
+      return flatName( self.die, withTag )
 
    def ctype( self ):
       ''' Return the string representing the ctype type for this type.
@@ -276,6 +279,18 @@ class FunctionType( Type ):
                self.resolver.dieToType( child.DW_AT_type ).ctype() )
       result.write( u")" )
       return result.getvalue()
+
+class ExternalType( Type ):
+   ''' Any type that appears in one of the existing import modules.
+   '''
+   def __init__( self, resolver, die, module ):
+      super( ExternalType, self ).__init__( resolver, die )
+      self.module = module
+
+   def pyName( self, withTag=True ):
+      ''' Prefix the pyName with the name of the imported package. '''
+      return "%s.%s" % ( self.module.__name__,
+                         super( ExternalType, self ).pyName( withTag ) )
 
 class FunctionDefType( FunctionType ):
    ''' A type representing a function declaration. We use these DIEs to
@@ -706,9 +721,6 @@ class StructType( MemberType ):
 
    __slots__ = []
 
-   def namePrefix( self ):
-      return "struct_"
-
    def ctype_subclass( self ):
       return u"Structure"
 
@@ -755,9 +767,6 @@ class UnionType( MemberType ):
    def ctype_subclass( self ):
       return u"Union"
 
-   def namePrefix( self ):
-      return "union_"
-
    def define( self, out ):
       if not super( UnionType, self ).define( out ):
          return False
@@ -777,9 +786,6 @@ class EnumType( Type ):
       if spec.nameless_enum is not None:
          self.nameless = spec.nameless_enum
 
-   def namePrefix( self ):
-      return "enum_"
-
    def define( self, out ):
       rtype = self.baseType()
       if rtype:
@@ -787,10 +793,10 @@ class EnumType( Type ):
       indent = ''
 
       out.write( u"class %s( %s ):\n" % ( self.pyName(), self.intType() ) )
+      out.write( u'%s_ctypegen_have_definition = True\n' % pad( 3 ) )
       if not self.nameless:
          indent = pad( 3 )
       else:
-         out.write( u'%spass\n\n' % pad( 3 ) )
          out.write( u'# Values of %s (nameless enum)\n' % self.pyName() )
 
       childcount = 0
@@ -815,6 +821,7 @@ class EnumType( Type ):
 
 def _align( _32, _64 ):
    return _32 if ctypes.sizeof( ctypes.c_void_p ) == 4 else _64
+
 class PrimitiveType( Type ):
    ''' Primitive types from DWARF/C: key is the C name. value is a tuple.
    The tuple contains the name of the ctypes equivalent type, the alignment of
@@ -843,9 +850,10 @@ class PrimitiveType( Type ):
          u"bool" : ( u"c_bool", _align( 1, 1 ) ),
          u"double" : ( u"c_double", _align( 4, 8 ) ),
          u"long double" : ( u"c_longdouble", _align( 4, 16 ) ),
-         u"_Float128" : ( u"c_longdouble", _align( 16, 16 ) ),
-         u"__float128" : ( u"c_longdouble", _align( 16, 16 ) ),
-         u"__int128" : ( u"(c_longlong * 2)", _align( -1, 16 ) ),
+         # ctypes has no type for 128 bit floats or ints on 32-bit
+         u"_Float128" : ( u"c_longdouble", _align( None, 16 ) ),
+         u"__float128" : ( u"c_longdouble", _align( None, 16 ) ),
+         u"__int128" : ( u"(c_longlong * 2)", _align( None, 16 ) ),
          u"wchar_t" : ( u"c_wchar", _align( 4, 4 ) ),
    }
 
@@ -853,7 +861,11 @@ class PrimitiveType( Type ):
       name = self.die.DW_AT_name
       if not name in PrimitiveType.baseTypes:
          raise Exception( "no python ctype for primitive C type %s" % name )
-      return PrimitiveType.baseTypes[ name ][ 1 ]
+      align = PrimitiveType.baseTypes[ name ][ 1 ]
+      if align is None:
+         raise Exception( "no python ctype for primitive C type %s " 
+                          "on this architecture" % name )
+      return align
 
    def name( self, withTag=True ):
       return self.ctype()
@@ -1210,13 +1222,18 @@ class TypeResolver( object ):
       if tag in bytag:
          return bytag[ tag ]
 
+      # No existing type for this DIE. If we have an existing structure/union
+      # type, then take it from one of the existing modules we've imported if
+      # that module has the definition.
+      pyIdent = asPythonId( flatName( die ) )
       for existingSet in self.existingTypes:
-         existingTags = existingSet.types.get( name )
-         if existingTags:
-            existingType = existingTags.get( tag )
-            if existingType and existingType.defined:
-               bytag[ tag ] = existingType # "import" this type.
-               return existingType
+         existingType = getattr( existingSet, pyIdent, None )
+         existingModule = getattr(existingType, '__module__', None )
+         defined = getattr(existingType, '_ctypegen_have_definition', False )
+         if existingModule == existingSet.__name__ and defined:
+            newType = ExternalType( self, die, existingSet )
+            bytag[ tag ] = newType
+            return newType
 
       newType = typeFromTag[ die.tag() ]( self, die )
       bytag[ tag ] = newType
@@ -1322,7 +1339,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 ''' )
 
       for pkg in self.existingTypes:
-         stream.write( u"import %s\n" % pkg.pkgname )
+         stream.write( u"import %s\n" % pkg.__name__ )
       stream.write( u"\n" )
 
       # Define any types needed by variables or functions, as they may
@@ -1363,7 +1380,8 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       for name, byTag in self.types.items():
          if len( byTag ) == 1:
             for tag, typ in byTag.items():
-               if typ.defined and tag in TAGGED_ELEMENTS:
+               if not isinstance( typ, ExternalType ) and \
+                        typ.defined and tag in TAGGED_ELEMENTS:
                   stream.write( "%s = %s # unambiguous name for tagged type\n" % (
                               typ.pyName( False ), typ.pyName( True ) ) )
 
@@ -1525,7 +1543,7 @@ def generate( libnames, outname, types, functions, header=None, modname=None,
                          namespaceFilter, macroFiles, trailer )
 
 def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
-                 namelessEnums=False ):
+      namelessEnums=False, existingTypes=None, skipTypes=None ):
    ''' Simplified "generate" that will generate code for all types, functions,
    and variables in a library '''
    dwarves = getDwarves( libs )
@@ -1535,9 +1553,19 @@ def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
       if name is None:
          name = die.name()
       return any( [ name in dwarf.dynnames() for dwarf in dwarves ] )
-   return generateDwarf( dwarves, outname, types=lambda die: True,
-         functions=allExterns, globalVars=allExterns, modname=modname,
-         macroFiles=macroFiles, trailer=trailer, namelessEnums=namelessEnums )
+
+   if skipTypes is None:
+      skipTypes = []
+
+   return generateDwarf( dwarves, outname,
+         types=lambda die: die.name() not in skipTypes,
+         functions=allExterns,
+         globalVars=allExterns,
+         modname=modname,
+         macroFiles=macroFiles,
+         trailer=trailer,
+         namelessEnums=namelessEnums,
+         existingTypes=existingTypes )
 
 class MacroCallback( object ):
    def __init__( self, output, interested ):

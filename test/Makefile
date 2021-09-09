@@ -38,12 +38,18 @@ libFOpenTest.so: FOpenTest.o
 libGreedyTest.so: GreedyTest.o GreedyTestCpp.o
 	$(CXX) -shared -o $@ $^
 
+libSupply.so: Supply.o
+	$(CXX) -shared -o $@ $^
+
+libDemand.so: Demand.o
+	$(CXX) -shared -o $@ $^
+
 EnumTest.o: CXXFLAGS=-fshort-enums -fPIC -g
 libEnumTest.so: EnumTest.o
 	$(CXX) -shared -o $@ $^
 
 check-bins: CTypeSanity MockTest libPreMockTest.so libChainTest.so libFOpenTest.so \
-   		libGreedyTest.so libEnumTest.so
+   		libGreedyTest.so libEnumTest.so libSupply.so libDemand.so
 
 check-ctypesanity: check-bins
 	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
@@ -66,8 +72,11 @@ check-enum: check-bins
 check-pointers: check-bins
 	$(PYTHON) ./PointersTest.py ./libFOpenTest.so
 
+check-supplydemand: check-bins
+	$(PYTHON) ./SupplyDemandGen.py
+
 check: check-mock check-pre-mock check-ctypesanity check-chain  check-pointers \
-   	check-greedy check-enum
+   	check-greedy check-enum check-supplydemand
 
 clean:
 	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py
