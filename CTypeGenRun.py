@@ -121,9 +121,11 @@ def test_class( cls ):
    checkSize( cls )
    checkUnalignedPtrs( cls )
 
-def test_classes():
+def test_classes( failed_macros=None ):
    # pylint: disable=no-member
    for cls in TestableCtypeClass.__subclasses__():
       test_class( cls )
    if errors:
       raise Exception( "\n".join( errors ) )
+   if failed_macros:
+      print( "unusable macros for this module: %s" % ",".join( failed_macros ) )

@@ -61,6 +61,10 @@ def clean( input_ ):
       output = ''
       prev_tok = None
       for tok in getTokens(input_):
+         # py2 has no ENCODING field; disable lint error. pylint: disable=no-member
+         if tok.type == token.INDENT or PY3 and tok.type == token.ENCODING:
+            continue
+         # pylint: enable=no-member
 
          if prev_tok:
             # splice in any whitespace that was skipped over into the output.
@@ -70,14 +74,17 @@ def clean( input_ ):
          if tok.type == token.NUMBER and tok.string[-1].upper() == 'L':
             output += tok.string[:-1]
 
+         # If the token is a single character string, then convert it to the literal
+         # character ordinal. C characters a numeric types, so treat as a python
+         # number.
+         elif tok.type == token.STRING and tok.string[0] == "'" and \
+                              len( tok.string ) == 3 and tok.string[2] == "'":
+            output += str(ord(tok.string[1]))
+
          # Convert old style octal numbers ("0123") to new style ("0o123")
          elif tok.type == token.NUMBER and len(tok.string) >= 2 and \
                tok.string[0] == '0' and tok.string[1].upper() != 'X':
             output += "0o%s" % tok.string[1:]
-
-         # ignore the ENCODING token for python3. Ignore the warning for python2.
-         elif PY3 and tok.type == token.ENCODING: # pylint: disable=no-member
-            pass
 
          # if the previous token was a number, and now we have a name like
          # "UL", just drop this token - it's a precision suffix that python

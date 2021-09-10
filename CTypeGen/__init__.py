@@ -23,6 +23,8 @@ import inspect
 import sys
 import ctypes
 import keyword
+import ast
+
 from collections import defaultdict
 
 import CTypeGen.expression
@@ -809,6 +811,8 @@ class EnumType( Type ):
             name = asPythonId( child.DW_AT_name )
             out.write( u"%s%s = %s(%d).value # %s\n" % (
                indent, name, self.intType(), value, hex( value ) ) )
+            if self.nameless:
+               self.resolver.defined.add( name )
       if childcount == 0:
          out.write( u"%spass\n" % indent )
 
@@ -854,7 +858,9 @@ class PrimitiveType( Type ):
          u"_Float128" : ( u"c_longdouble", _align( None, 16 ) ),
          u"__float128" : ( u"c_longdouble", _align( None, 16 ) ),
          u"__int128" : ( u"(c_longlong * 2)", _align( None, 16 ) ),
+         u"__int128 unsigned" : ( u"(c_ulonglong * 2)", _align( -1, 16 ) ),
          u"wchar_t" : ( u"c_wchar", _align( 4, 4 ) ),
+         u"char32_t" : ( u"c_int", _align( 4, 4 ) ),
    }
 
    def alignment( self ):
@@ -1072,6 +1078,7 @@ class TypeResolver( object ):
          "types",             # All the types we have found
          "typesFilter",       # called to see if we should render a type
          "variables",         # All the variables we want to render
+         "defined",
 
    ]
 
@@ -1092,6 +1099,7 @@ class TypeResolver( object ):
       self.producers = set()
       self.applyHints = {}
       self.allHintedTypes = {}
+      self.defined = set()
 
       allNamespaces = set()
 
@@ -1269,6 +1277,8 @@ class TypeResolver( object ):
 
       typ.defined = typ.define( out )
       assert typ.defined is not None # typ.define should return a bool.
+      if typ.defined:
+         self.defined.add( typ.pyName() )
       return typ.defined
 
    def examineDIE( self, handle, die ):
@@ -1568,32 +1578,41 @@ def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
          existingTypes=existingTypes )
 
 class MacroCallback( object ):
-   def __init__( self, output, interested ):
+   def __init__( self, output, interested, resolver ):
       self.filescope = []
       self.interested = interested if callable( interested ) \
                         else lambda f : f in interested
       self.defining = 0
       self.output = output
-      self.output.write( "# Macro definitions:\n" )
-      self.defined = set()
+      self.resolver = resolver
 
    def define ( self, line, data ):
       if not self.defining:
          return
 
       firstSpace = data.find( ' ' )
-      firstParen = data.find( '(' )
+      openParen = data.find( '(' )
 
-      if firstParen != -1 and firstParen < firstSpace:
+      if openParen != -1 and openParen < firstSpace:
+         closeParen = data.find( ')', openParen + 1 )
+         argStr = data[ openParen : closeParen + 1 ]
+         args = ast.parse( argStr )
+         args = args.body[0].value
+         if isinstance( args, ast.Name ):
+            macroArgs = [ args.id ]
+         else:
+            macroArgs = [ elt.id for elt in args.elts ]
+         name = data[ 0:openParen ]
+         value = data[ closeParen + 1: ]
+      else:
+         # no-arg macro.
+         macroArgs = None
+         name = data[ 0:firstSpace ]
+         value = data[ firstSpace + 1: ]
+
+      if name in self.resolver.defined:
          return
 
-      # no-arg macro. We'll try and define it.
-      name = data[ 0:firstSpace ]
-
-      if name in self.defined:
-         return
-
-      value = data[ firstSpace + 1: ]
       if value == "":
          value = "None"
       else:
@@ -1604,12 +1623,28 @@ class MacroCallback( object ):
          if name == value:
             return
          for n in names:
-            if n not in self.defined:
+            if not ( n in self.resolver.defined or macroArgs and n in macroArgs ):
                return
 
-      self.defined.add( name )
-      self.output.write( "%s = %s # %s:%d\n" %
-                        ( name, value, self.filescope[ -1 ][ 1 ], line ) )
+      self.resolver.defined.add( name )
+
+      # some macros may not be evaluatable. For example, casts look like
+      # expressions: we have:
+      #
+      # #define SIG_ERR ((sighandler_t) -1 )
+      #
+      # If sighandler_t is an int, then this is an arithmentic expression. If
+      # its a type, then its a type cast. We don't discriminate when parsing
+      # the AST so wrap macros in try/catch
+      self.output.write("try:\n")
+      if macroArgs is not None:
+         self.output.write( "   def %s%s: return %s" % ( name, argStr, value ) )
+      else:
+         self.output.write( "   %s = %s" % ( name, value ) )
+      self.output.write( " # %s:%d\n" % ( self.filescope[ -1 ][ 1 ], line ) )
+      self.output.write( "except:\n" )
+      self.output.write( "   __ctypegen_failed_macros.append('%s')\n" % name )
+
 
    def undef( self, line, data ):
       pass
@@ -1654,12 +1689,14 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
          content.write( header )
       resolver.write( content )
 
+      content.write( "__ctypegen_failed_macros = []\n" )
+      content.write( "# Macro definitions:\n" )
       if macroFiles is not None:
-         macros = MacroCallback( content, macroFiles )
+         macros = MacroCallback( content, macroFiles, resolver )
          for binary in binaries:
             for unit in binary.units():
                unit.macros( macros )
-         content.write( "# (end Macro definitions)\n\n" )
+      content.write( "# (end Macro definitions)\n\n" )
 
       content.write( "CTYPEGEN_producers__ = {\n" )
       for p in sorted( resolver.producers ):
@@ -1668,7 +1705,7 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
 
       # Make the whole shebang test itself when run.
       content.write( u'\nif __name__ == "__main__":\n' )
-      content.write( u'   test_classes()\n' )
+      content.write( u'   test_classes( __ctypegen_failed_macros )\n' )
 
       if trailer is not None:
          content.write( trailer )
@@ -1676,7 +1713,9 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
    if modname is None:
       modname = outname.split( "." )[ 0 ]
    mod = imp.load_source( modname, outname )
-   mod.test_classes()
+   # pylint: disable=protected-access
+   mod.test_classes( mod.__ctypegen_failed_macros )
+   # pylint: enable=protected-access
    resolver.pkgname = modname
    sys.stderr.write( "generated and tested %s\n" % modname )
    return ( mod, resolver )

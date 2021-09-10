@@ -147,6 +147,8 @@ if not any ( i.startswith( "clang" ) for i in module.CTYPEGEN_producers__ ):
    assert module.B == module.A + 32
    assert module.C == module.B + 32
    assert module.HELLO == 'hello world'
+   assert module.ADD(1, 2) == 3
+   assert module.ADD_42(2) == 44
 
 print( "Make sure 64-bit values are generated properly." )
 assert theCTypes.contents.bigEnum.value == module.BigNum.Big
