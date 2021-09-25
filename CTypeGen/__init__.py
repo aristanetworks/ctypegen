@@ -93,6 +93,7 @@ def asPythonId( s ):
          u"&" : u"_amp",
          u"[" : u"_lbrack",
          u"]" : u"_rbrack",
+         u"'" : u"_quot",
          }
    if s is None:
       return None
@@ -307,9 +308,6 @@ class FunctionDefType( FunctionType ):
          name = self.die.name()
       dynNames = self.die.object().dynnames().get( name )
       if dynNames is None:
-         self.resolver.errorfunc( "cannot provide access to %s - "
-                                  " '%s' not in dynamic symbol table" %
-                                  ( self.name(), name ) )
          return
 
       for linkername in dynNames:
@@ -1383,7 +1381,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       # this module.
       for typ, hint in sorted( self.allHintedTypes.items() ):
          if hint.pythonName != typ.ctype():
-            stream.write( u'%s = %s\n' % ( hint.pythonName, typ.ctype() ) )
+            stream.write( u'%s = %s # python hint differs from ctype\n' % ( hint.pythonName, typ.ctype() ) )
 
       # If tagged types don't conflict with untagged, we can make aliases without
       # the tag prefix
@@ -1472,7 +1470,7 @@ class PythonType( object ):
 
    def __init__( self, pythonName, cName=None, base=None, pack=False,
            mixins=None, nameless_enum=None, elements=None ):
-      self.pythonName = pythonName
+      self.pythonName = asPythonId( pythonName )
       self.cName = cName if cName is not None else pythonName
       self.fieldHints = {}
       self.pack = pack
