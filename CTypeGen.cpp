@@ -823,10 +823,18 @@ entry_file( PyObject * self, PyObject * args ) {
 }
 
 static PyObject *
-pyAttr( Dwarf::AttrName name, const Dwarf::Attribute & attr ) {
+pyAttr( PyDwarfEntry *entry, Dwarf::AttrName name, const Dwarf::Attribute & attr ) {
    try {
       if ( !attr.valid() )
          Py_RETURN_NONE;
+
+      switch (name) {
+         case Dwarf::DW_AT_decl_file: {
+            auto idx = intmax_t( attr );
+            auto lines = entry->die.unit->getLines();
+            return makeString( lines->files[ idx ].name );
+         }
+      }
       switch ( attr.form() ) {
        case Dwarf::DW_FORM_addr:
          return PyLong_FromUnsignedLongLong( uintmax_t( attr ) );
@@ -897,7 +905,7 @@ entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
    const auto pyEntry = ( PyDwarfEntry * )self;
    auto name = Dwarf::AttrName( idx );
    const Dwarf::Attribute & attr = pyEntry->die.attribute( name );
-   return pyAttr( name, attr );
+   return pyAttr( pyEntry, name, attr );
 }
 
 /*
@@ -906,11 +914,11 @@ entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
 static PyObject *
 entry_get_attrs( PyObject * self, PyObject * args ) {
    auto namedict = PyDict_New();
-   const auto & die = reinterpret_cast< PyDwarfEntry * >( self )->die;
-   for ( const auto & attr : die.attributes() ) {
+   const auto entry = reinterpret_cast< PyDwarfEntry * >( self );
+   for ( const auto & attr : entry->die.attributes() ) {
       PyDict_SetItem( namedict,
                       PyLong_FromLong( attr.first ),
-                      pyAttr( attr.first, attr.second ) );
+                      pyAttr( entry, attr.first, attr.second ) );
    }
    return namedict;
 }
@@ -921,11 +929,11 @@ entry_get_attrs( PyObject * self, PyObject * args ) {
 static PyObject *
 entry_get_attrs_by_name( PyObject * self, PyObject * args ) {
    auto namedict = PyDict_New();
-   const auto & die = reinterpret_cast< PyDwarfEntry * >( self )->die;
-   for ( const auto & attr : die.attributes() ) {
+   auto entry = reinterpret_cast< PyDwarfEntry * >( self );
+   for ( const auto & attr : entry->die.attributes() ) {
       PyObject * attrname =
          PyDict_GetItem( attrnames, PyLong_FromLong( attr.first ) );
-      PyDict_SetItem( namedict, attrname, pyAttr( attr.first, attr.second ) );
+      PyDict_SetItem( namedict, attrname, pyAttr(entry, attr.first, attr.second ) );
    }
    return namedict;
 }

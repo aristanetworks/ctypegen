@@ -53,8 +53,10 @@ TAGGED_ELEMENTS = set( [
 # python3 doesn't have basestring
 try:
    baseString = basestring # pylint: disable=basestring-builtin
+   PY3=False
 except NameError:
    baseString = str
+   PY3=True
 
 try:
    dict.iteritems
@@ -1291,9 +1293,6 @@ class TypeResolver( object ):
             self.producers.add( producer )
          return True
 
-      if die.DW_AT_name is None:
-         return False # Ignore anything without its own name
-
       if tag == tags.DW_TAG_variable:
          if ( self.globalsFilter( die )
               and self.variables.get( die.fullname() ) is None ):
@@ -1381,7 +1380,8 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       # this module.
       for typ, hint in sorted( self.allHintedTypes.items() ):
          if hint.pythonName != typ.ctype():
-            stream.write( u'%s = %s # python hint differs from ctype\n' % ( hint.pythonName, typ.ctype() ) )
+            stream.write( u'%s = %s # python hint differs from ctype\n' % (
+                          hint.pythonName, typ.ctype() ) )
 
       # If tagged types don't conflict with untagged, we can make aliases without
       # the tag prefix
@@ -1470,6 +1470,9 @@ class PythonType( object ):
 
    def __init__( self, pythonName, cName=None, base=None, pack=False,
            mixins=None, nameless_enum=None, elements=None ):
+      if not PY3 and isinstance( pythonName, str ):
+         # This is py2 compat code, so pylint: disable=unicode-builtin
+         pythonName = unicode( pythonName, 'utf-8' )
       self.pythonName = asPythonId( pythonName )
       self.cName = cName if cName is not None else pythonName
       self.fieldHints = {}
@@ -1594,8 +1597,11 @@ class MacroCallback( object ):
       if openParen != -1 and openParen < firstSpace:
          closeParen = data.find( ')', openParen + 1 )
          argStr = data[ openParen : closeParen + 1 ]
-         args = ast.parse( argStr )
-         args = args.body[0].value
+         try:
+            args = ast.parse( argStr )
+            args = args.body[0].value
+         except SyntaxError:
+            return
          if isinstance( args, ast.Name ):
             macroArgs = [ args.id ]
          else:
