@@ -533,7 +533,7 @@ unit_macros( PyObject * self, PyObject * args ) {
    const Dwarf::Macros *macros = unit->getMacros();
    if ( macros != nullptr ) {
       PythonMacros visitor( unit, callback );
-      if ( !macros->visit( unit.get(), &visitor ) )
+      if ( !macros->visit( *unit, &visitor ) )
          return nullptr;
    }
    Py_RETURN_NONE;
@@ -834,6 +834,8 @@ pyAttr( PyDwarfEntry *entry, Dwarf::AttrName name, const Dwarf::Attribute & attr
             auto lines = entry->die.unit->getLines();
             return makeString( lines->files[ idx ].name );
          }
+         default:
+            break;
       }
       switch ( attr.form() ) {
        case Dwarf::DW_FORM_addr:
@@ -859,11 +861,17 @@ pyAttr( PyDwarfEntry *entry, Dwarf::AttrName name, const Dwarf::Attribute & attr
             return PyLong_FromLongLong( intmax_t( attr ) );
          return PyLong_FromUnsignedLongLong( uintmax_t( attr ) );
 
+       case Dwarf::DW_FORM_strx1:
+       case Dwarf::DW_FORM_strx2:
+       case Dwarf::DW_FORM_strx3:
+       case Dwarf::DW_FORM_strx4:
+       case Dwarf::DW_FORM_strx:
        case Dwarf::DW_FORM_GNU_strp_alt:
        case Dwarf::DW_FORM_string:
        case Dwarf::DW_FORM_strp:
        case Dwarf::DW_FORM_line_strp:
          return makeString( std::string( attr ) );
+
        case Dwarf::DW_FORM_ref1:
        case Dwarf::DW_FORM_ref2:
        case Dwarf::DW_FORM_ref4:

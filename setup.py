@@ -58,4 +58,7 @@ setup( name="CTypeGen",
             Extension( 'libCTypeMock', [ 'cmock.cpp', 'thunk-%s.s' % arch ],
                 **pstack_extension_options ),
         ],
+        scripts=[
+            "ctypegen"
+        ],
         )
