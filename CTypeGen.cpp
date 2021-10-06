@@ -831,7 +831,7 @@ pyAttr( PyDwarfEntry *entry, Dwarf::AttrName name, const Dwarf::Attribute & attr
       switch (name) {
          case Dwarf::DW_AT_decl_file: {
             auto idx = intmax_t( attr );
-            auto lines = entry->die.unit->getLines();
+            auto lines = entry->die.getUnit()->getLines();
             return makeString( lines->files[ idx ].name );
          }
          default:
