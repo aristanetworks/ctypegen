@@ -869,6 +869,8 @@ class PrimitiveType( Type ):
          raise Exception( "no python ctype for primitive C type %s" % name )
       align = PrimitiveType.baseTypes[ name ][ 1 ]
       if align is None:
+         if die.DW_AT_encoding == 0x3: # Complex float.
+             return die.DW_AT_byte_size / 2
          raise Exception( "no python ctype for primitive C type %s " 
                           "on this architecture" % name )
       return align
@@ -879,6 +881,14 @@ class PrimitiveType( Type ):
    def ctype( self ):
       name = self.die.DW_AT_name
       if not name in PrimitiveType.baseTypes:
+         defn = self.definition()
+         if defn.DW_AT_encoding == 0x3: # Complex float.
+            if defn.DW_AT_byte_size == 32:
+               return u'(c_longdouble * 2 )'
+            if defn.DW_AT_byte_size == 16:
+               return u'(c_double * 2 )'
+            return u'(c_float * 2 )'
+
          raise Exception( "no python ctype for primitive C type %s" % name )
       return PrimitiveType.baseTypes[ name ][ 0 ]
 
