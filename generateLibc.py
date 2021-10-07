@@ -45,6 +45,8 @@ broken = set( [ (n, ) for n in [
       "stackblock",
       "timex",
       "link_map",
+      "rtld_global", # contains a link_map
+      "struct_link_map",
       "_Unwind_Exception",
 
        ] ] )
