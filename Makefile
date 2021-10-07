@@ -15,18 +15,20 @@
 .PHONY: all test install clean build-all
 
 PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
-PYTHONPATH = $(PWD):$(wildcard $(PWD)/build/lib*)
+
+PYTHONPATH = $(PWD):`echo $(PWD)/build/lib*`
 
 all: build-all CMock/libc.py
-	echo "built for $(PYTHON)"
+	echo "Built for $(PYTHON)"
 
 build-all:
 	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py build
+
 install:
 	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
 test:
-	echo "$(PYTHONPATH)"
 	PYTHONPATH=$(PYTHONPATH) make -C test
+	echo "Tested for $(PYTHON)"
 
 dbghelper.o: CFLAGS=-O0 -g -fPIC -fno-eliminate-unused-debug-types -g3
 libdbghelper.so: dbghelper.o
@@ -34,9 +36,9 @@ libdbghelper.so: dbghelper.o
 
 # Generate helpers for libc.
 # Try and force PYTHONPATH to load the just-built version of the C extensions.
-CMock/libc.py: libdbghelper.so
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) ./generateLibc.py libc.so.6 $@
+CMock/libc.py: libdbghelper.so build-all
+	-PYTHONPATH=$(PYTHONPATH) $(PYTHON) ./generateLibc.py libc.so.6 $@ || echo '(Ignore Exception above)'
 
 clean:
-	rm -rf build __pycache__ core libc.py libdbghelper.so *.o
+	rm -rf build __pycache__ core CMock/libc.py libdbghelper.so *.o
 	make -C test clean
