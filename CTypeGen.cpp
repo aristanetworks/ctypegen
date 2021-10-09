@@ -92,7 +92,7 @@ static int nextFileId = 1;
  */
 typedef struct {
    PyObject_HEAD
-   Dwarf::Units units;
+   Dwarf::Info::Units units;
 } PyUnits;
 
 /*
@@ -100,8 +100,8 @@ typedef struct {
  */
 typedef struct {
    PyObject_HEAD
-   Dwarf::DIEIter begin;
-   Dwarf::DIEIter end;
+   Dwarf::DIE::Children::const_iterator begin;
+   Dwarf::DIE::Children::const_iterator end;
 } PyDwarfEntryIterator;
 
 /*
@@ -109,8 +109,8 @@ typedef struct {
  */
 typedef struct {
    PyObject_HEAD
-   Dwarf::UnitIterator begin;
-   Dwarf::UnitIterator end;
+   Dwarf::Info::Units::iterator begin;
+   Dwarf::Info::Units::iterator end;
 } PyDwarfUnitIterator;
 
 /*
@@ -183,7 +183,7 @@ namespace {
  */
 static std::string
 dieName( const Dwarf::DIE & die ) {
-   const Dwarf::Attribute & name = die.attribute( Dwarf::DW_AT_name );
+   const Dwarf::DIE::Attribute & name = die.attribute( Dwarf::DW_AT_name );
    if ( name.valid() )
       return std::string( name );
 
@@ -597,7 +597,7 @@ elf_units( PyObject * self, PyObject * args ) {
    try {
       PyElfObject * elf = ( PyElfObject * )self;
       PyUnits * units = PyObject_New( PyUnits, &unitsType );
-      new ( &units->units ) Dwarf::Units( elf->dwarf->getUnits() );
+      new ( &units->units ) Dwarf::Info::Units( elf->dwarf->getUnits() );
       return ( PyObject * )units;
    } catch ( const std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
@@ -623,15 +623,15 @@ elf_dynnames( PyObject * self, PyObject * args ) {
       // First, create mapping from addr to list-of-dynamic-name
       if (dynsyms) {
          for ( const auto & sym : *dynsyms ) {
-            if ( sym.symbol.st_shndx == SHN_UNDEF )
+            if ( sym.st_shndx == SHN_UNDEF )
                continue;
             if ( sym.isHidden() )
                continue;
-            auto & list = addr2dynname[ sym.symbol.st_value ];
+            auto & list = addr2dynname[ sym.st_value ];
             if ( list == nullptr ) {
                list = PyList_New( 0 );
             }
-            PyList_Append( list, makeString( sym.name ) );
+            PyList_Append( list, makeString( dynsyms->name( sym ) ) );
          }
       }
 
@@ -639,10 +639,10 @@ elf_dynnames( PyObject * self, PyObject * args ) {
       if (debugsyms) {
          // Now map from debug symbol name to list-of-dynamic-symbol-names
          for ( const auto & sym : *debugsyms ) {
-            auto dyn = addr2dynname.find( sym.symbol.st_value );
+            auto dyn = addr2dynname.find( sym.st_value );
             if ( dyn == addr2dynname.end() )
                continue;
-            auto key = makeString( sym.name );
+            auto key = makeString( debugsyms->name( sym ) );
             Py_INCREF( dyn->second );
             PyDict_SetItem( pyelf->dynnames, key, dyn->second );
          }
@@ -766,9 +766,9 @@ entry_iterator( PyObject * self ) {
       PyDwarfEntry * ent = ( PyDwarfEntry * )self;
       PyDwarfEntryIterator * it =
          PyObject_New( PyDwarfEntryIterator, &dwarfEntryIteratorType );
-      Dwarf::DIEChildren list = ent->die.children();
-      new ( &it->begin ) Dwarf::DIEIter( list.begin() );
-      new ( &it->end ) Dwarf::DIEIter( list.end() );
+      Dwarf::DIE::Children list = ent->die.children();
+      new ( &it->begin ) Dwarf::DIE::Children::const_iterator( list.begin() );
+      new ( &it->end ) Dwarf::DIE::Children::const_iterator( list.end() );
       return ( PyObject * )it;
    } catch ( const std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
@@ -785,8 +785,8 @@ units_iterator( PyObject * self ) {
       PyUnits * units = ( PyUnits * )self;
       PyDwarfUnitIterator * it =
          PyObject_New( PyDwarfUnitIterator, &unitsIteratorType );
-      new ( &it->begin ) Dwarf::UnitIterator( units->units.begin() );
-      new ( &it->end ) Dwarf::UnitIterator( units->units.end() );
+      new ( &it->begin ) Dwarf::Info::Units::iterator( units->units.begin() );
+      new ( &it->end ) Dwarf::Info::Units::iterator( units->units.end() );
       return ( PyObject * )it;
    } catch ( const std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
@@ -823,7 +823,7 @@ entry_file( PyObject * self, PyObject * args ) {
 }
 
 static PyObject *
-pyAttr( PyDwarfEntry *entry, Dwarf::AttrName name, const Dwarf::Attribute & attr ) {
+pyAttr( PyDwarfEntry *entry, Dwarf::AttrName name, const Dwarf::DIE::Attribute & attr ) {
    try {
       if ( !attr.valid() )
          Py_RETURN_NONE;
@@ -912,7 +912,7 @@ static PyObject *
 entry_getattr_idx( PyObject * self, Py_ssize_t idx ) {
    const auto pyEntry = ( PyDwarfEntry * )self;
    auto name = Dwarf::AttrName( idx );
-   const Dwarf::Attribute & attr = pyEntry->die.attribute( name );
+   const Dwarf::DIE::Attribute & attr = pyEntry->die.attribute( name );
    return pyAttr( pyEntry, name, attr );
 }
 
@@ -1004,8 +1004,8 @@ entryiter_iter( PyObject * self ) {
 static void
 entryiter_free( PyObject * o ) {
    PyDwarfEntryIterator * it = ( PyDwarfEntryIterator * )o;
-   it->begin.Dwarf::DIEIter::~DIEIter();
-   it->end.Dwarf::DIEIter::~DIEIter();
+   it->begin.Dwarf::DIE::Children::const_iterator::~const_iterator();
+   it->end.Dwarf::DIE::Children::const_iterator::~const_iterator();
    elfObjectType.tp_free( o );
 }
 
@@ -1027,8 +1027,8 @@ unititer_next( PyObject * self ) {
 static void
 unititer_free( PyObject * o ) {
    PyDwarfUnitIterator * it = ( PyDwarfUnitIterator * )o;
-   it->begin.Dwarf::UnitIterator::~UnitIterator();
-   it->end.Dwarf::UnitIterator::~UnitIterator();
+   it->begin.Dwarf::Info::Units::iterator::~iterator();
+   it->end.Dwarf::Info::Units::iterator::~iterator();
    unitsIteratorType.tp_free( o );
 }
 

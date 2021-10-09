@@ -27,7 +27,7 @@ else:
 warnCount = 0
 warnings = []
 
-module, generator = generateAll( sanitylib, "GreedyTest.py" )
+module, generator = generateAll( sanitylib, "GreedyTest.py", skipTypes=[ "__unknown__" ] )
 
 dll = CDLL( sanitylib )
 module.decorateFunctions( dll )

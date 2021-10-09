@@ -1231,7 +1231,6 @@ class TypeResolver( object ):
 
       if die is None:
          return VoidType( self )
-
       tag = die.tag()
       name = die.fullname()
       if name not in self.types:

@@ -34,7 +34,7 @@ dll = ctypes.CDLL( mocklib )
 # access to when generating the ctypes code.
 regex = re.compile( r"([su])([0-9]+)t" )
 module, resolver = CTypeGen.generate( "libEnumTest.so", "EnumGenerated.py",
-        types=lambda die: True,
+        types=lambda die: die.name() != "__unknown__",
         functions=lambda die: False,
         globalVars=lambda die: regex.match( die.name() ) )
 
