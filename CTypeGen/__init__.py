@@ -1302,6 +1302,12 @@ class TypeResolver( object ):
             self.producers.add( producer )
          return True
 
+      # Don't automatically generate anything for unnamed types, because the
+      # caller can't reference them reliable. The exception is enums, which
+      # might provide useful identifiers.
+      if die.DW_AT_name is None and tag != tags.DW_TAG_enumeration_type:
+         return False
+
       if tag == tags.DW_TAG_variable:
          if ( self.globalsFilter( die )
               and self.variables.get( die.fullname() ) is None ):
