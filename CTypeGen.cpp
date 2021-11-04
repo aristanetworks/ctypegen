@@ -607,6 +607,45 @@ elf_units( PyObject * self, PyObject * args ) {
    }
 }
 
+static PyObject *
+elf_soname( PyObject * self, PyObject * args ) {
+   try {
+      PyElfObject * pyelf = ( PyElfObject * )self;
+
+      auto &elf = pyelf->dwarf->elf;
+
+      // Grab the PT_DYNAMIC header.
+      for ( auto &segment : elf->getSegments( PT_DYNAMIC ) ) {
+         OffsetReader dynReader(elf->io, segment.p_offset, segment.p_filesz);
+         Elf::Off soname = -1;
+         Elf::Off strtab = -1;
+
+         for (const auto &i : ReaderArray<Elf::Dyn>(dynReader)) {
+            switch (i.d_tag) {
+               case DT_STRTAB:
+                  strtab = i.d_un.d_ptr;
+                  break;
+               case DT_SONAME:
+                  soname = i.d_un.d_ptr;
+                  break;
+            }
+         }
+         if (soname == -1 || strtab == -1)
+            continue;
+
+         auto strings = elf->getSegmentForAddress(strtab);
+         if (strings == nullptr)
+            continue;
+         return makeString( elf->io->readString( strings->p_offset + strtab + soname - strings->p_vaddr ) );
+      }
+      Py_RETURN_NONE;
+   } catch ( const std::exception & ex ) {
+      PyErr_SetString( PyExc_RuntimeError, ex.what() );
+      return nullptr;
+   }
+}
+
+
 /*
  * Returns a dict mapping names from .symtab (debug symbols) to a list of names
  * in .dynsym (used for linking). The Dwarf tree matches what's in the debug
@@ -1042,6 +1081,8 @@ static PyMethodDef ctypegen_methods[] = {
 
 static PyMethodDef elf_methods[] = {
    { "units", elf_units, METH_VARARGS, "get a list of unit-level DWARF entries" },
+   { "soname", elf_soname, METH_VARARGS,
+                  "get the name of this library as used to locate it at run-time" },
    { "dynnames",
      elf_dynnames,
      METH_VARARGS,

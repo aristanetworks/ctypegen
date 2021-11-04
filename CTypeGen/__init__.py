@@ -854,11 +854,12 @@ class PrimitiveType( Type ):
          u"bool" : ( u"c_bool", _align( 1, 1 ) ),
          u"double" : ( u"c_double", _align( 4, 8 ) ),
          u"long double" : ( u"c_longdouble", _align( 4, 16 ) ),
-         # ctypes has no type for 128 bit floats or ints on 32-bit
-         u"_Float128" : ( u"c_longdouble", _align( None, 16 ) ),
-         u"__float128" : ( u"c_longdouble", _align( None, 16 ) ),
+         # ctypes has no type for 128 bit floats - do our best.
+         # There are no 128-bit ints on 32-bit
+         u"_Float128" : ( u"c_longdouble", _align( 16, 16 ) ),
+         u"__float128" : ( u"c_longdouble", _align( 16, 16 ) ),
          u"__int128" : ( u"(c_longlong * 2)", _align( None, 16 ) ),
-         u"__int128 unsigned" : ( u"(c_ulonglong * 2)", _align( -1, 16 ) ),
+         u"__int128 unsigned" : ( u"(c_ulonglong * 2)", _align( None, 16 ) ),
          u"wchar_t" : ( u"c_wchar", _align( 4, 4 ) ),
          u"char32_t" : ( u"c_int", _align( 4, 4 ) ),
    }
@@ -1716,6 +1717,22 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
             for unit in binary.units():
                unit.macros( macros )
       content.write( "# (end Macro definitions)\n\n" )
+
+
+      content.write("CTYPEGEN_SONAMES = [\n")
+      for b in binaries:
+         content.write("\t'%s',\n" % b.soname())
+      content.write("]\n")
+
+      content.write("""
+# Use this to return a CDLL handle that has functions decorate with type info.
+def decoratedLib( idx = 0 ):
+      lib = ctypes.CDLL( CTYPEGEN_SONAMES[ idx ] )
+      if lib:
+         decorateFunctions( lib )
+      return lib
+
+""")
 
       content.write( "CTYPEGEN_producers__ = {\n" )
       for p in sorted( resolver.producers ):
