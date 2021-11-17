@@ -705,16 +705,17 @@ class MemberType( Type ):
             out.write( u"%s._pack_ = 1 # %s\n" % ( self.pyName(), packComment ) )
             self.alignment_ = 1
 
+         if self.anonMembers:
+            out.write( u"%s._anonymous_ = (\n" % self.pyName() )
+            for field in sorted( self.anonMembers ):
+               out.write( u"   \"%s\",\n" % field.pyName() )
+            out.write( u"   )\n" )
+
          # Now that we've worked out what to do with the "pack" field, we can
          # finally assign to the type's _fields_
          out.write( u"%s._fields_ = %s._fields_pre\n" %
                ( self.pyName(), self.pyName() ) )
 
-      if self.anonMembers:
-         out.write( u"%s._anonymous_ = (\n" % self.pyName() )
-         for field in sorted( self.anonMembers ):
-            out.write( u"   \"%s\",\n" % field.pyName() )
-         out.write( u"   )\n" )
       out.write( u"\n" )
       return True
 
