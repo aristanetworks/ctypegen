@@ -1634,6 +1634,10 @@ class MacroCallback( object ):
       if name in self.resolver.defined:
          return
 
+      # If a previous module has defined the macro, avoid the duplication.
+      if any( name in other.__dict__ for other in self.resolver.existingTypes ):
+         return
+
       if value == "":
          value = "None"
       else:
