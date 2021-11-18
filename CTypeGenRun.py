@@ -99,8 +99,10 @@ def checkSize( cls ):
    if ctypes.sizeof( cls ) == 0 and cls._ctypegen_native_size == 1:
       # empty C++ classes are size 1. We can let this discrepancy slide.
       return
-   addError( "type %s has wrong size. expected %d, got %d" % (
-               cls.__name__, cls._ctypegen_native_size, ctypes.sizeof( cls ) ) )
+   addError( "type %s has mismatched size. %d in ctypes, %d in DWARF" % (
+               cls.__name__,
+               ctypes.sizeof( cls ),
+               cls._ctypegen_native_size) )
 
 def checkOffsets( cls ):
    ''' if we have _fields_ and offsets defined for the class, make sure they
@@ -113,7 +115,7 @@ def checkOffsets( cls ):
       if offset is not None:
          ctypesOffset = getattr( cls, field[ 0 ] ).offset
          if ctypesOffset != offset and offset != -1:
-            addError( "field %s of %s has offset %d, should be %d" %
+            addError( "field %s of %s has offset %d in ctypes, %d in DWARF" %
                         ( field[ 0 ], str( cls ), ctypesOffset, offset ) )
 
 def test_class( cls ):
