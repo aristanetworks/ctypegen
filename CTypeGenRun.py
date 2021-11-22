@@ -67,6 +67,9 @@ def checkUnalignedPtrs( t ):
    else:
       allowed = []
 
+   if allowed is True:
+      return
+
    for fieldinfo in t._fields_: # note this tuple may have 3 values for a bitfield
       fname, ftype = fieldinfo[ 0 ], fieldinfo[ 1 ]
       alignment = ctypes.alignment( ftype )

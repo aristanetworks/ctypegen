@@ -63,6 +63,9 @@ def haveDyn( die ):
 
 
 def notBroken( die ):
+   fname = die.fullname()
+   if fname in packed:
+      return PythonType( fname, pack=True, unalignedPtrs=True )
    return die.fullname() not in broken
 
 generate(

@@ -617,8 +617,9 @@ elf_soname( PyObject * self, PyObject * args ) {
       // Grab the PT_DYNAMIC header.
       for ( auto &segment : elf->getSegments( PT_DYNAMIC ) ) {
          OffsetReader dynReader(elf->io, segment.p_offset, segment.p_filesz);
-         Elf::Off soname = -1;
-         Elf::Off strtab = -1;
+         constexpr Elf::Off NOT_FOUND = std::numeric_limits<Elf::Off>::max();
+         Elf::Off soname = NOT_FOUND;
+         Elf::Off strtab = NOT_FOUND;
 
          for (const auto &i : ReaderArray<Elf::Dyn>(dynReader)) {
             switch (i.d_tag) {
@@ -630,7 +631,7 @@ elf_soname( PyObject * self, PyObject * args ) {
                   break;
             }
          }
-         if (soname == -1 || strtab == -1)
+         if (soname == NOT_FOUND || strtab == NOT_FOUND)
             continue;
 
          auto strings = elf->getSegmentForAddress(strtab);
