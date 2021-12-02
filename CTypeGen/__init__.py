@@ -392,6 +392,25 @@ class Member( object ):
       self.pre_pads = []
 
 
+# Try and detect empty subclasses. If a member is an inheritance type, and all
+# it's members are in turn inheritance types, and none have any real data
+# members at all, then we ignore the inheritance. (otherwise, we'd pad out the
+# type by the sizeof the object, which will be 1, even though it will not
+# contribute to the size of the subclass
+
+def isEmptySubtype( member ):
+   if member.die.tag() != tags.DW_TAG_inheritance:
+      return False
+
+   memberType = member.type()
+   if isinstance( memberType, ExternalType ):
+      # give up
+      return False
+   for submember in memberType.members:
+      if not isEmptySubtype( submember ):
+         return False
+   return True
+
 def die_size( die ):
    if die.DW_AT_byte_size is not None:
       return die.DW_AT_byte_size
@@ -608,6 +627,8 @@ class MemberType( Type ):
          expected_end = 0
 
          for memnum, member in enumerate( self.members ):
+            if isEmptySubtype( member ):
+               continue
             fieldOffset = member.die.DW_AT_data_member_location # might be None
 
             # Make sure we actually have a proper definition of the type for
@@ -663,7 +684,7 @@ class MemberType( Type ):
 
             fieldDie = member.die
             off = die_bit_offset( fieldDie )
-            if off is not None:
+            if off is not None and member.ctypeOverride is None:
                while off >= expected_end:
                   # this field occupies a new data object
                   if fieldDie.DW_AT_bit_size <= expected_end - expected_bit_offset:
