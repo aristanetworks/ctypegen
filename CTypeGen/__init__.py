@@ -1224,6 +1224,8 @@ class TypeResolver( object ):
             self.namespaceFilter = lambda die: True
          else:
             self.namespaceFilter = lambda die: die.fullname() in allNamespaces
+      else:
+         self.namespaceFilter = namespaceFilter
 
       for dwarf in self.dwarves:
          for u in dwarf.units():
@@ -1617,7 +1619,8 @@ def generate( libnames, outname, types, functions, header=None, modname=None,
                          namespaceFilter, macroFiles, trailer )
 
 def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
-      namelessEnums=False, existingTypes=None, skipTypes=None ):
+      namelessEnums=False, existingTypes=None, skipTypes=None,
+      namespaceFilter=None ):
    ''' Simplified "generate" that will generate code for all types, functions,
    and variables in a library '''
    dwarves = getDwarves( libs )
@@ -1639,7 +1642,8 @@ def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
          macroFiles=macroFiles,
          trailer=trailer,
          namelessEnums=namelessEnums,
-         existingTypes=existingTypes )
+         existingTypes=existingTypes,
+         namespaceFilter=namespaceFilter )
 
 class MacroCallback( object ):
    def __init__( self, output, interested, resolver ):

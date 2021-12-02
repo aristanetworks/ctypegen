@@ -35,6 +35,8 @@ def main():
    ap.add_argument( "-U", "--use-modules", nargs="+",
          help="existing python modules to import and find definitions in",
          default=[] )
+   ap.add_argument( "-C", "--nonamespaces",
+         help="don't walk C++ namespaces", default=False, action='store_true' )
    res = ap.parse_args()
 
    existingTypes= [ importlib.import_module( mod ) for mod in res.use_modules ]
@@ -44,7 +46,8 @@ def main():
                          namelessEnums=res.nameless_enums,
                          macroFiles=( lambda fname: True ) if res.macros else None,
                          skipTypes=res.skip_types,
-                         existingTypes=existingTypes )
+                         existingTypes=existingTypes,
+                         namespaceFilter = lambda ns: not res.nonamespaces )
 
 if __name__ == "__main__":
    main()
