@@ -415,6 +415,13 @@ def die_size( die ):
    if die.DW_AT_byte_size is not None:
       return die.DW_AT_byte_size
 
+   # clang sometimes doesn't present a size for pointer types. (specifically,
+   # for __va_list_tag, which appears to be builtin rather than declared
+   # anywhere in a header). We assume that if a pointer doesn't have an
+   # explicit size, then its size is the same as the size of a pointer-to-void
+   if die.tag() == tags.DW_TAG_pointer_type:
+      return ctypes.sizeof( ctypes.c_void_p )
+
    baseSize = die_size( die.DW_AT_type )
    if die.tag() == tags.DW_TAG_array_type:
       dims = getArrayDimensions( die )
@@ -909,6 +916,7 @@ class PrimitiveType( Type ):
          u"int" : ( u"c_int", _align( 4, 4 ) ),
          u"short int" : ( u"c_short", _align( 2, 2 ) ),
          u"short" : ( u"c_short", _align( 2, 2 ) ),
+         u"__ARRAY_SIZE_TYPE__": ( u"c_ulong", _align( 4, 8 ) ),
          u"float" : ( u"c_float", _align( 4, 4 ) ),
          u"_Bool" : ( u"c_bool", _align( 1, 1 ) ),
          u"bool" : ( u"c_bool", _align( 1, 1 ) ),
