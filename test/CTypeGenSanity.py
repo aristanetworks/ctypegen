@@ -54,19 +54,10 @@ globalVars = [
        "thisIsTheTypedef",
 ]
 
-warnCount = 0
 warnings = []
 
-def clearWarnings():
-   global warnCount
-   global warnings
-   warnCount = 0
-   warnings = []
-
 def testwarning( txt ):
-   global warnCount
    print( "warning: %s" % txt )
-   warnCount += 1
    warnings.append( txt )
 
 # test some common error cases:
@@ -82,9 +73,8 @@ module, generator = generate(
       macroFiles=[ "macrosanity.h" ]
       )
 
-assert warnCount == 1
-assert "requires a list of ELF images" in warnings[ 0 ]
-clearWarnings()
+assert len(warnings) == 1 and "requires a list of ELF images" in warnings[ 0 ]
+warnings = []
 
 # generate the module, complete with warnings
 module, generator = generate(
@@ -99,10 +89,11 @@ module, generator = generate(
 
 # under "clang" we generate a warning because we cannot completely define
 # the content of std::string, nor find std::allocator
-assert warnCount == 3 or ( warnCount == 5 and any(
-   "failed to find definition for std::allocator" in w for w in warnings ) \
-      and any( "padded std::basic_string" in w for w in warnings ) )
-clearWarnings()
+warnings = [ w for w in warnings
+      if 'failed to find definition for std::allocator' not in w
+      and 'padded std::basic_string' not in w ]
+assert len( warnings ) == 3
+warnings = []
 
 dll = CDLL( sanitylib )
 module.decorateFunctions( dll )
