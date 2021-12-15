@@ -34,8 +34,8 @@
 
 #include <libpstack/elf.h>
 #include <libpstack/dwarf.h>
-#include <libpstack/stringify.h>
 #include <libpstack/global.h>
+#include <libpstack/stringify.h>
 
 namespace {
 
