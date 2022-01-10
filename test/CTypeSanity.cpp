@@ -288,6 +288,49 @@ NameSharedWithStructAndTypedef nameSharedWithStructAndTypedef;
 Outer::Inner::Leaf spacedLeaf;
 Leaf globalLeaf;
 
+struct Empty1 { };
+
+struct Empty2 { };
+
+struct NotEmpty {
+   int field;
+};
+
+struct VirtualEmpty {
+   virtual ~VirtualEmpty() {}
+};
+
+struct InheritEmpty : public Empty1 {
+   int ie_sentinel;
+};
+
+struct InheritEmptyTwice : public Empty1, public Empty2 {
+   int ie2_sentinel;
+};
+
+struct InheritEmptyFirst : public Empty1, public NotEmpty {
+   int ie3_sentinel;
+};
+
+struct InheritEmptySecond : public NotEmpty, public Empty1 {
+   int ie4_sentinel;
+};
+
+struct InheritVirtualEmpty : public Empty1, public VirtualEmpty {
+   int ie5_sentinel;
+};
+
+struct EmptyEmpty : public Empty1, public Empty2 { };
+
+class Empty1 e1;
+class Empty2 e2;
+class InheritEmpty ie;
+class InheritEmptyTwice ie2;
+class InheritEmptyFirst ie3;
+class InheritEmptySecond ie4;
+class InheritVirtualEmpty ie5;
+class EmptyEmpty ie6;
+
 int
 main( int argc, char * argv[] ) {
    std::cout << *make_foo() << "\n";

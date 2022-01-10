@@ -392,22 +392,26 @@ class Member( object ):
       self.pre_pads = []
 
 
-# Try and detect empty subclasses. If a member is an inheritance type, and all
-# it's members are in turn inheritance types, and none have any real data
+# Try and detect empty base classes. If a member is an inheritance type, and
+# all it's members are in turn inheritance types, and none have any real data
 # members at all, then we ignore the inheritance. (otherwise, we'd pad out the
 # type by the sizeof the object, which will be 1, even though it will not
 # contribute to the size of the subclass
 
-def isEmptySubtype( member ):
+def isEmptyBase( member ):
    if member.die.tag() != tags.DW_TAG_inheritance:
       return False
 
    memberType = member.type()
    if isinstance( memberType, ExternalType ):
-      # give up
-      return False
+      return False # give up
+
+   if isinstance( memberType, Typedef ):
+      return isEmptyBase(
+            memberType.resolver.dieToType( memberType.die.DW_AT_type ) )
+
    for submember in memberType.members:
-      if not isEmptySubtype( submember ):
+      if not isEmptyBase( submember ):
          return False
    return True
 
@@ -457,6 +461,7 @@ class MemberType( Type ):
            "mixins",
            "packed",
            "unalignedPtrs",
+           "superCount",
 
            ]
 
@@ -477,11 +482,12 @@ class MemberType( Type ):
       self.mixins = []
       self.packed = False
       self.unalignedPtrs = False
+      self.superCount = 0
 
    def findMembers( self ):
       if self.members:
          return
-      superCount = 0
+      self.superCount = 0
       anon_field = 0
 
       for field in self.definition():
@@ -490,8 +496,8 @@ class MemberType( Type ):
             continue
          if tag == tags.DW_TAG_inheritance:
             member = Member( field, self.resolver )
-            member.setName( u"__super__%d" % superCount )
-            superCount += 1
+            member.setName( u"__super__%d" % self.superCount )
+            self.superCount += 1
             self.members.append( member )
          elif tag == tags.DW_TAG_member:
             member = Member( field, self.resolver )
@@ -634,7 +640,7 @@ class MemberType( Type ):
          expected_end = 0
 
          for memnum, member in enumerate( self.members ):
-            if isEmptySubtype( member ):
+            if isEmptyBase( member ):
                continue
             fieldOffset = member.die.DW_AT_data_member_location # might be None
 
@@ -748,10 +754,15 @@ class MemberType( Type ):
          # If the expected ending position is less than actual ending position,
          # The structure is bigger than we estimated, so it's got some padding
          # at the end. It's probably an unnamed bitfield, but just pad it with
-         # characters
+         # characters.
+         #
+         # We skip the case of a type with no non-inheritance members. For C++,
+         # that's probably an empty base type, like a traits type. Adding padding
+         # will just make it the wrong size for the "empty base class optimization"
          actual_size = self.definition().DW_AT_byte_size
          if self.definition().tag() != tags.DW_TAG_union_type and \
-               expected_end < actual_size:
+               expected_end < actual_size and \
+               len( self.members ) != self.superCount:
             out.write( u"   ( \"__trailing_pad\", (c_char * %d)),\n" % (
                actual_size - expected_end ) )
 

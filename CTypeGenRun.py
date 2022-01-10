@@ -96,10 +96,12 @@ def checkSize( cls ):
 
    if not hasattr( cls, "_ctypegen_have_definition" ):
       return
-   if ctypes.sizeof( cls ) == cls._ctypegen_native_size:
+
+   sz = ctypes.sizeof( cls )
+   if sz == cls._ctypegen_native_size:
       # DWARF and python agree on size.
       return
-   if ctypes.sizeof( cls ) == 0 and cls._ctypegen_native_size == 1:
+   if sz == 0 and cls._ctypegen_native_size == 1:
       # empty C++ classes are size 1. We can let this discrepancy slide.
       return
    addError( "type %s has mismatched size. %d in ctypes, %d in DWARF" % (
