@@ -673,7 +673,9 @@ elf_dynnames( PyObject * self, PyObject * args ) {
             if ( list == nullptr ) {
                list = PyList_New( 0 );
             }
-            PyList_Append( list, makeString( dynsyms->name( sym ) ) );
+            auto str = makeString( dynsyms->name(sym) );
+            PyList_Append( list, str );
+            Py_DECREF( str ); // PyList_Append doesn't steal a ref, so release ours.
          }
       }
 
@@ -685,8 +687,9 @@ elf_dynnames( PyObject * self, PyObject * args ) {
             if ( dyn == addr2dynname.end() )
                continue;
             auto key = makeString( debugsyms->name( sym ) );
-            Py_INCREF( dyn->second );
             PyDict_SetItem( pyelf->dynnames, key, dyn->second );
+            // PyDict_SetItem doesn't steal references.
+            Py_DECREF( key );
          }
       }
 
