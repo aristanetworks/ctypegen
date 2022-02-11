@@ -34,8 +34,8 @@
 
 #include <libpstack/elf.h>
 #include <libpstack/dwarf.h>
-#include <libpstack/global.h>
 #include <libpstack/stringify.h>
+#include <libpstack/global.h>
 
 namespace {
 
@@ -637,7 +637,8 @@ elf_soname( PyObject * self, PyObject * args ) {
          auto strings = elf->getSegmentForAddress(strtab);
          if (strings == nullptr)
             continue;
-         return makeString( elf->io->readString( strings->p_offset + strtab + soname - strings->p_vaddr ) );
+         return makeString( elf->io->readString(
+                  strings->p_offset + strtab + soname - strings->p_vaddr ) );
       }
       Py_RETURN_NONE;
    } catch ( const std::exception & ex ) {
@@ -673,7 +674,7 @@ elf_dynnames( PyObject * self, PyObject * args ) {
             if ( list == nullptr ) {
                list = PyList_New( 0 );
             }
-            auto str = makeString( dynsyms->name(sym) );
+            auto str = makeString( dynsyms->name( sym ) );
             PyList_Append( list, str );
             Py_DECREF( str ); // PyList_Append doesn't steal a ref, so release ours.
          }
