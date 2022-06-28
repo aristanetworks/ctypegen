@@ -1711,8 +1711,14 @@ class MacroCallback( object ):
             return
          if isinstance( args, ast.Name ):
             macroArgs = [ args.id ]
+         elif PY3 and isinstance( args,
+               ast.Constant ): # pylint: disable=no-member
+            macroArgs = [ args.value ]
          else:
-            macroArgs = [ elt.id for elt in args.elts ]
+            macroArgs = [
+               elt.value
+               if PY3 and isinstance( elt, ast.Constant ) # pylint: disable=no-member
+               else elt.id for elt in args.elts ]
          name = data[ 0:openParen ]
          value = data[ closeParen + 1: ]
       else:
