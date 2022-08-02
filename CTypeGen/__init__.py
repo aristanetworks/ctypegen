@@ -1329,16 +1329,21 @@ class TypeResolver( object ):
 
       # No existing type for this DIE. If we have an existing structure/union
       # type, then take it from one of the existing modules we've imported if
-      # that module has the definition.
-      pyIdent = asPythonId( flatName( die ) )
-      for existingSet in self.existingTypes:
-         existingType = getattr( existingSet, pyIdent, None )
-         existingModule = getattr(existingType, '__module__', None )
-         defined = getattr(existingType, '_ctypegen_have_definition', False )
-         if existingModule == existingSet.__name__ and defined:
-            newType = ExternalType( self, die, existingSet )
-            bytag[ tag ] = newType
-            return newType
+      # that module has the definition. We avoid this for anonymous dies -
+      # their names are unique within the context of a single library, but they
+      # may collide with names in other libraries, even though it would never
+      # make sense to cross-reference from a type in one DSO to an anonymous
+      # one in another.
+      if die.DW_AT_name is not None:
+         pyIdent = asPythonId( flatName( die ) )
+         for existingSet in self.existingTypes:
+            existingType = getattr( existingSet, pyIdent, None )
+            existingModule = getattr(existingType, '__module__', None )
+            defined = getattr(existingType, '_ctypegen_have_definition', False )
+            if existingModule == existingSet.__name__ and defined:
+               newType = ExternalType( self, die, existingSet )
+               bytag[ tag ] = newType
+               return newType
 
       newType = typeFromTag[ die.tag() ]( self, die )
       bytag[ tag ] = newType
