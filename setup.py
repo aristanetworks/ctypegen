@@ -39,6 +39,7 @@ pstack_extension_options = {
     'include_dirs' : [ pstack_base + "/include" ],
     'library_dirs' : [ pstack_base + "/lib" ],
     'runtime_library_dirs' : [ pstack_base + "/lib" ],
+    'extra_compile_args' : [ '--std=c++17' ],
 }
 
 setup( name="CTypeGen",
