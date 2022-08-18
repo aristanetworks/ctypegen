@@ -24,6 +24,8 @@ from __future__ import absolute_import, division, print_function
 from CTypeGen import generate
 import sys
 
+packed = []
+
 # These don't render properly - packed structures, bitfield issues, etc.
 broken = set( [ (n, ) for n in [ 
 
