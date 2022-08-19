@@ -19,6 +19,7 @@ import ctypes
 from CTypeGen import generate
 import CMock
 import gc
+import platform
 
 if len( sys.argv ) >= 2:
    mocklib = sys.argv[ 1 ]
@@ -128,17 +129,20 @@ checkMocked()
 # the mocked one returns 99, and entry_g asserts g returns whatever is psased
 # to entry_g
 
-print( "checking STOMP mock" )
+if platform.machine() != 'aarch64': # A4NOCHECK: "64" != "aarch64"
+   print( "checking STOMP mock" )
 
-@CMock.Mock( lib.g, method=CMock.STOMP )
-def mockedG( i, s ):
-   print( "this is the mocked g %d/%s" % ( i, s ) )
-   assert( s == b"forty-two" and i == 42 )
-   return 99
+   @CMock.Mock( lib.g, method=CMock.STOMP )
+   def mockedG( i, s ):
+      print( "this is the mocked g %d/%s" % ( i, s ) )
+      assert( s == b"forty-two" and i == 42 )
+      return 99
 
-lib.entry_g( 99 )
-mockedG.disable()
-lib.entry_g( 42 )
+   lib.entry_g( 99 )
+   mockedG.disable()
+   lib.entry_g( 42 )
+else:
+   print( "STOMP mocks not supported on aarch64" )
 
 print( "check calls to C++ functions via name demangling" )
 function = CMock.mangleFunc( lib, "A::Cpp::Namespace::withAFunction",

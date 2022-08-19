@@ -307,14 +307,27 @@ class FunctionDefType( FunctionType ):
    def writeLibUpdates( self, indent, stream ):
       """Write function's prototype to stream"""
       base = self.baseType()
+      obj = self.die.object()
+
       name = self.die.DW_AT_linkage_name
       if name is None:
          name = self.die.name()
-      dynNames = self.die.object().dynnames().get( name )
-      if dynNames is None:
-         return
+      names = []
 
-      for linkername in dynNames:
+      # Find all dynamic symbols at the address of this function,
+      # and decorate them with the type of the function.
+      if self.die.DW_AT_low_pc is not None:
+         dynNames = obj.dynaddrs().get( self.die.DW_AT_low_pc )
+         if dynNames is not None:
+            names += dynNames
+
+      # External functions that get inlined in the translation units may not
+      # have a DW_AT_low_pc, so if we have a dynamic symbol that is an exact
+      # name match, then use that too.
+      if self.die.DW_AT_external and obj.symbol( name ) is not None:
+         names += [ name ]
+
+      for linkername in sorted( set( names ) ):
          if keyword.iskeyword( linkername ):
             self.resolver.errorfunc( "cannot provide access to %s - "
                   "its dynamic name %s is a python keyword" %
@@ -1670,19 +1683,20 @@ def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
    and variables in a library '''
    dwarves = getDwarves( libs )
 
-   def allExterns( die ):
-      name = die.DW_AT_linkage_name
-      if name is None:
-         name = die.name()
-      return any( [ name in dwarf.dynnames() for dwarf in dwarves ] )
+   def externFunc( die ):
+      return die.DW_AT_low_pc in die.object().dynaddrs()
 
    if skipTypes is None:
       skipTypes = []
 
+   def externData( die ):
+      name = die.DW_AT_linkage_name if die.DW_AT_linkage_name else die.name()
+      return die.object().symbol( name ) is not None
+
    return generateDwarf( dwarves, outname,
          types=lambda die: die.name() not in skipTypes,
-         functions=allExterns,
-         globalVars=allExterns,
+         functions=externFunc,
+         globalVars=externData,
          modname=modname,
          macroFiles=macroFiles,
          trailer=trailer,

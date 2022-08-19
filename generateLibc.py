@@ -24,45 +24,74 @@ from __future__ import absolute_import, division, print_function
 from CTypeGen import generate
 import sys
 
-packed = []
+if platform.machine() == "aarch64": # A4NOCHECK want CPU arch, not size.
+   platformPacked = []
+   platformBroken = [
+         "DIR",
+         "__dirstream",
+         "__prfpregset_t",
+         "elf_fpregset_t",
+         "fpregset_t",
+         "link_map",
+         "mcontext_t",
+         "prfpregset_t",
+         "pthread",
+         "rtld_global",
+         "sigcontext",
+         "struct_user_fpsimd_struct",
+         "ucontext_t",
+         "user_fpsimd_struct",
+         ]
 
-# These don't render properly - packed structures, bitfield issues, etc.
-broken = set( [ (n, ) for n in [ 
+elif platform.machine() == "x86_64": # A4NOCHECK, want CPU arch, not size.
+   platformPacked = [
+         "epoll_event",
+         ]
+   platformBroken = [
+         "DIR",
+         "_Unwind_Exception",
+         "__dirstream",
+         "epoll_data",
+         "helper_file",
+         "link_map",
+         "pthread",
+         "stackblock",
+         ]
 
+elif platform.machine() in ( "i386", "i686" ): # A4NOCHECK, want CPU arch, not size
+   platformPacked = []
+   platformBroken = []
+
+else:
+   # may need to be filled in for new archs.
+   platformPacked = []
+   platformBroken = []
+
+# Types that need to be packed on this platform.
+
+packed = set( [ (n, ) for n in [
+   ] + platformPacked ] )
+
+# Broken types on this platform. The additional types here are broken on any
+# platforms we've seen
+broken = set( [ (n, ) for n in [
       "cached_data",
-      "DIR",
-      "__dirstream",
-      "epoll_data",
-      "epoll_event",
       "hashentry",
-      "helper_file",
       "in6addrinfo",
       "_IO_FILE_complete",
       "_IO_FILE_complete_plus",
       "_IO_lock_t",
       "printf_info",
       "printf_spec",
-      "pthread",
       "raise", # python keyword.
-      "stackblock",
-      "timex",
-      "link_map",
-      "rtld_global", # contains a link_map
-      "struct_link_map",
-      "_Unwind_Exception",
-
-       ] ] )
+       ] + platformBroken ] )
 
 def haveDyn( die ):
    ''' Filter for functions that are in the .dynsym section - we can't call
    other functions anyway, and CTypeGen will just generate a warning if they
    appear. '''
-   obj = die.object()
-   name = die.DW_AT_linkage_name
-   if name is None:
-      name = die.name()
-   return name in obj.dynnames()
-
+   addr = die.DW_AT_low_pc
+   return addr is not None and addr in die.object().dynaddrs()
 
 def notBroken( die ):
    fname = die.fullname()
@@ -76,4 +105,5 @@ generate(
       types=notBroken,
       functions=lambda die: notBroken( die ) and haveDyn( die ),
       macroFiles='dbghelper.c',
+      namelessEnums=True,
       )

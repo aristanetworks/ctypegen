@@ -80,7 +80,7 @@ typedef struct {
    PyObject_HEAD
    Elf::Object::sptr obj;
    Dwarf::Info::sptr dwarf;
-   PyObject *dynnames; // dict mapping debug name to list-of-dynamic name.
+   PyObject *dynaddrs; // dict mapping address to list-of-dynamic name
    int fileId;
 } PyElfObject;
 
@@ -568,7 +568,7 @@ elf_open( PyObject * self, PyObject * args ) {
       PyElfObject * val = PyObject_New( PyElfObject, &elfObjectType );
       new ( &val->obj ) std::shared_ptr< Elf::Object >( obj );
       new ( &val->dwarf ) std::shared_ptr< Dwarf::Info >( dwarf );
-      val->dynnames = nullptr;
+      val->dynaddrs = nullptr;
 
       // DW_AT_linker_name attributes refer to the name of the symbol in .symtabv
       // We are more interested in the name for dynamic linking - so we can decorate
@@ -656,10 +656,10 @@ elf_soname( PyObject * self, PyObject * args ) {
  */
 
 static PyObject *
-elf_dynnames( PyObject * self, PyObject * args ) {
+elf_dynaddrs( PyObject * self, PyObject * args ) {
    PyElfObject * pyelf = ( PyElfObject * )self;
-   if ( pyelf->dynnames == nullptr ) {
-      pyelf->dynnames = PyDict_New();
+   if ( pyelf->dynaddrs == nullptr ) {
+      pyelf->dynaddrs = PyDict_New();
       std::map< Elf::Addr, PyObject * > addr2dynname;
       auto obj = pyelf->dwarf->elf;
 
@@ -671,6 +671,9 @@ elf_dynnames( PyObject * self, PyObject * args ) {
                continue;
             if ( sym.isHidden() )
                continue;
+            auto name = dynsyms->name( sym );
+            if (name == "")
+               continue;
             auto & list = addr2dynname[ sym.st_value ];
             if ( list == nullptr ) {
                list = PyList_New( 0 );
@@ -681,26 +684,29 @@ elf_dynnames( PyObject * self, PyObject * args ) {
          }
       }
 
-      auto debugsyms = obj->debugSymbols();
-      if (debugsyms) {
-         // Now map from debug symbol name to list-of-dynamic-symbol-names
-         for ( const auto & sym : *debugsyms ) {
-            auto dyn = addr2dynname.find( sym.st_value );
-            if ( dyn == addr2dynname.end() )
-               continue;
-            auto key = makeString( debugsyms->name( sym ) );
-            PyDict_SetItem( pyelf->dynnames, key, dyn->second );
-            // PyDict_SetItem doesn't steal references.
-            Py_DECREF( key );
-         }
+      for ( auto &&[addr, list] : addr2dynname ) {
+         auto key = PyLong_FromLong( addr );
+         PyDict_SetItem( pyelf->dynaddrs, key, list );
+         // PyDict_SetItem doesn't steal references.
+         Py_DECREF( key );
+         Py_DECREF( list );
       }
-
-      // Clean up all our addr->dyn references.
-      for ( auto i : addr2dynname )
-         Py_DECREF( i.second );
    }
-   Py_INCREF( pyelf->dynnames );
-   return pyelf->dynnames;
+   Py_INCREF( pyelf->dynaddrs );
+   return pyelf->dynaddrs;
+}
+
+static PyObject *
+elf_symbol( PyObject * self, PyObject * args ) {
+   PyElfObject * pyelf = ( PyElfObject * )self;
+   const char *name = nullptr;
+   if ( !PyArg_ParseTuple( args, "s", &name ) ) {
+      return nullptr;
+   }
+   auto sym = pyelf->dwarf->elf->findDynamicSymbol(name);
+   if ( sym.st_shndx == SHN_UNDEF )
+      Py_RETURN_NONE;
+   return PyLong_FromLong ( sym.st_value );
 }
 
 static PyObject *
@@ -728,8 +734,8 @@ elf_free( PyObject * o ) {
    openFiles.erase( pye->dwarf.get() );
    pye->obj.std::shared_ptr< Elf::Object >::~shared_ptr< Elf::Object >();
    pye->dwarf.std::shared_ptr< Dwarf::Info >::~shared_ptr< Dwarf::Info >();
-   if ( pye->dynnames != nullptr )
-      Py_DECREF( pye->dynnames );
+   if ( pye->dynaddrs != nullptr )
+      Py_DECREF( pye->dynaddrs );
    elfObjectType.tp_free( o );
 }
 
@@ -1089,14 +1095,13 @@ static PyMethodDef elf_methods[] = {
    { "units", elf_units, METH_VARARGS, "get a list of unit-level DWARF entries" },
    { "soname", elf_soname, METH_VARARGS,
                   "get the name of this library as used to locate it at run-time" },
-   { "dynnames",
-     elf_dynnames,
-     METH_VARARGS,
-     "get a name from the dynamic symbol table to match one in the debug table" },
-   { "findDefinition",
-     elf_findDefinition,
-     METH_VARARGS,
-     "Given a DIE for a declaration, find a definition DIE with the same name" },
+   { "dynaddrs", elf_dynaddrs, METH_VARARGS,
+                 "get a mapping of addr->dynamic symbol name" },
+   { "symbol", elf_symbol, METH_VARARGS,
+                 "get address of symbol" },
+   { "findDefinition", elf_findDefinition, METH_VARARGS,
+                 "Given a DIE for a declaration, find "
+                 "a definition DIE with the same name" },
    { 0, 0, 0, 0 }
 };
 

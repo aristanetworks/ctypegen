@@ -25,7 +25,10 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#if defined(__i386__ ) || defined(__x86_64__)
+// for systems with separate IO space.
 #include <sys/io.h>
+#endif
 #include <sys/ipc.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
@@ -41,6 +44,7 @@
 #include <sys/ucontext.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <linux/perf_event.h>
 
 #include <ctype.h>
 #include <elf.h>
