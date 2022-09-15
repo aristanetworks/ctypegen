@@ -911,6 +911,9 @@ class EnumType( Type ):
       return True
 
    def intType( self ):
+      typ = self.definition().DW_AT_type
+      if typ is None:
+         return "c_uint"
       primitive = self.resolver.dieToType( self.definition().DW_AT_type )
       return primitive.pyName()
 
@@ -927,8 +930,12 @@ class PrimitiveType( Type ):
 
    baseTypes = {
          u"long long unsigned int" : ( u"c_ulonglong", _align(4, 8) ),
+         u"unsigned long long" : ( u"c_ulonglong", _align(4, 8) ),
          u"long long int" : ( u"c_longlong", _align(4, 8) ),
+         u"long long" : ( u"c_longlong", _align(4, 8) ),
          u"long unsigned int" : ( u"c_ulong", _align(4, 8) ),
+         u"unsigned long" : ( u"c_ulong", _align( 4, 8 ) ),
+         u"sizetype" : ( u"c_ulong", _align( 4, 8 ) ),
          u"short unsigned int" : ( u"c_ushort", _align( 2, 2 ) ),
          u"unsigned short" : ( u"c_ushort", _align( 2, 2 ) ),
          u"unsigned int" : ( u"c_uint", _align( 4, 4 ) ),
@@ -937,6 +944,7 @@ class PrimitiveType( Type ):
          u"signed char" : ( u"c_byte", _align( 1, 1 ) ),
          u"char" : ( u"c_char", _align( 1, 1 ) ),
          u"long int" : ( u"c_long", _align( 4, 8 ) ),
+         u"long" : ( u"c_long", _align( 4, 8 ) ),
          u"int" : ( u"c_int", _align( 4, 4 ) ),
          u"short int" : ( u"c_short", _align( 2, 2 ) ),
          u"short" : ( u"c_short", _align( 2, 2 ) ),
