@@ -14,7 +14,7 @@
 
 .PHONY: all test install clean build-all
 
-PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
+PYTHON ?= $(shell which python3) # default to where we find python3
 
 PYTHONPATH = $(PWD):`echo $(PWD)/build/lib*`
 
