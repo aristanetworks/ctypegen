@@ -21,8 +21,13 @@ missing. The helper library uses them, so we can find their definitions in
 there. '''
 
 from __future__ import absolute_import, division, print_function
-from CTypeGen import generate
+from CTypeGen import generate, PythonType
 import sys
+import platform
+
+# packing issues differ from platform to platform - these set of types need to
+# be explicitly packed, or are somehow broken on their respective
+# architectures.
 
 if platform.machine() == "aarch64": # A4NOCHECK want CPU arch, not size.
    platformPacked = []
@@ -68,7 +73,6 @@ else:
    platformBroken = []
 
 # Types that need to be packed on this platform.
-
 packed = set( [ (n, ) for n in [
    ] + platformPacked ] )
 

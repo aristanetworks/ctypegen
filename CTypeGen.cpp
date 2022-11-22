@@ -191,9 +191,9 @@ dieName( const Dwarf::DIE & die ) {
 
    std::ostringstream os;
    auto it = openFiles.find(die.getUnit()->dwarf);
-   // We may not have an open file if we have a separate dwarf object.  For a
-   // dwz split image, we'll only have one for all units, so just use a large
-   // fixed ID.
+   // We may not have an open file if we have a separate DWZ splitdwarf object.
+   // For such a split image, we'll only have one for all units, so just use a
+   // large fixed ID.
    int id = it != openFiles.end() ? it->second->fileId : 1000000;
 
    os << "anon_" << id << "_" << die.getOffset();
