@@ -36,14 +36,6 @@
 
 */
 
-# offsets into the second page. We have 2048 4-byte words of memory in our 8k,
-# use the end of the page for structured data, and the rest as a stack for return
-# addresses
-
-.set STACKP,1020 * 8
-.set GOTENT,1021 * 8 # location of the GOT entry we're thunking.
-.set CALLBACK1,1022 * 8
-.set CALLBACK2,1023 * 8
 
 /*
 x86_64 ABI:
@@ -70,32 +62,22 @@ r15  - callee-saved
 So, we have r11, and everything else needs to be preserved.
 */
 
-
+START:
+# offsets into the second page. We have 1024 8-byte words of memory in our 8k,
+# use the end of the page for structured data, and the rest as a stack for
+# return addresses. We use PC-relative addressing, so add "START" for the assembler
+.set STACKP,START + 1020 * 8
+.set GOTENT,START + 1021 * 8
+.set CALLBACK1,START + 1022 * 8
+.set CALLBACK2,START + 1023 * 8
 
 cmock_thunk_function:
-
-	# We need to preserve rax, and also the return address, hence an
-	# extra register beyond %r11, which we use to hold on to our thunk's
-	# stack frame. Having rax under the return address makes it easier
-	# to restore before the call into the first callback (where we need to
-	# have popped the original return address off the machine stack)
-	pop %r11
-	push %rax
-	push %r11
-
-	call .next
-.next:  .set offset,.next - cmock_thunk_function
-	pop %r11
-
 	# Create a frame on the stack, and point r11 at it.
-	subq $72, STACKP - offset(%r11)
-	mov STACKP - offset (%r11), %r11
+	subq $72, STACKP(%rip)
+	mov STACKP(%rip), %r11
 
-	# save what we need - return address, args, chain pointer, RAX
-
-	pop %rax		# return address.
+	# save all the registers we need to restore later.
 	mov %rax, (%r11)
-
 	mov %rdi, 8(%r11)
 	mov %rsi, 16(%r11)
 	mov %rdx, 24(%r11)
@@ -104,22 +86,23 @@ cmock_thunk_function:
 	mov %r9, 48(%r11)
 	mov %r10, 56(%r11)
 
-	pop %rax		# restore RAX for storage, and for callee.
+	# We need to enter CALLBACK1 and CALLBACK2 with the stack at the same
+	# point it was at on entry to cmock_thunk_function - pop the return
+	# address off, and store it in our thunk stack.
+	pop %rax
 	mov %rax, 64(%r11)
 
-	call .next4
-.next4:  .set offset4,.next4 - cmock_thunk_function
-	pop %r11
+        # We just trashed rax - restore from thunk stack for the call to CALLBACK1
+	mov (%r11), %rax
 
 	# Machine stack now contains no return address (it's in thunk stack)
-	call *CALLBACK1 - offset4 (%r11)
+	call *CALLBACK1(%rip)
 
-	call .next2
-.next2:  .set offset2,.next2 - cmock_thunk_function
-	pop %r11
+	mov STACKP(%rip), %r11
 
-	mov STACKP - offset2 (%r11), %r11
-
+	# Restore all the registers we previously saved - we can rely on
+	# CALLBACK2 to preserve the ABI, so don't need to restore later
+	mov (%r11), %rax
 	mov 8(%r11), %rdi
 	mov 16(%r11), %rsi
 	mov 24(%r11), %rdx
@@ -127,34 +110,31 @@ cmock_thunk_function:
 	mov 40(%r11), %r8
 	mov 48(%r11), %r9
 	mov 56(%r11), %r10
-	mov 64(%r11), %rax
 
-	call .next3
-.next3:  .set offset3,.next3 - cmock_thunk_function
-	pop %r11
+	addq $64, STACKP(%rip) # just leave the return address.
+	call *CALLBACK2(%rip)
 
-	# return address to our caller is on-stack - jump to the second callee.
-	call *CALLBACK2 - offset3(%r11)
-
-	call .next5
-.next5:  .set offset5,.next5 - cmock_thunk_function
-	pop %r11
-	sub $offset5, %r11
-
+	# Check if the GOT has changed - if so, we need re-insert our own GOT
+	# value, and replace our pointer to callback2 with the newly resolved GOT
+	# entry. (The GOT should point to this thunk, if not, then the GOT entry
+	# previously pointed to a PLT entry that updated the GOT before calling
+	# the real function.)
+	lea START(%rip), %r11
 	# We can use the argument registers now - don't need to preserve them
-	mov GOTENT(%r11), %rdi
+	mov GOTENT(%rip), %rdi
 	mov (%rdi), %rsi
 	cmp %rsi, %r11
 	je .noupdate
-	mov %rsi, CALLBACK2(%r11)
+	mov %rsi, CALLBACK2(%rip)
 	mov %r11, (%rdi)
 
 .noupdate:
-	addq $72, STACKP (%r11)
-	mov STACKP (%r11), %r11
-
-	mov -72(%r11), %r11
+	# Now restore the return address from the thunk frame on to the system
+	# and discard the thunk frame from the thunk stack.
+	mov STACKP(%rip), %r11
+	mov (%r11), %r11
 	push %r11
+	addq $8, STACKP(%rip)
 	ret
 
 cmock_thunk_end:
