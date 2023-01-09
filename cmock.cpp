@@ -204,13 +204,30 @@ class PreMock : public GOTMock {
 class StompMock : protected Mock {
    friend void enableMock< StompMock >( StompMock * );
    friend void disableMock< StompMock >( StompMock * );
-   static constexpr int savesize = __WORDSIZE == 32 ? 5 : 13;
 
-   // the assembler to stomp over the function's prelude to enable the mock.
-   char enableCode[ savesize ];
+   // Store two sets of machine code - one, enableCode, for when the mock is
+   // enabled (to jump to the mocking function), and one, disableCode, for when
+   // its disabled (the original code that was present in the mocked function).
+   // These get copied over the mocked function's prelude to enable/disable the
+   // mock.
+#ifdef __aarch64__
+   // Because ARM instructions are fixed-width, it's easiest to deal with the
+   // text as an array of 32-bit values. We need 5 for our jump code for this
+   // platform - one to move each 16 bits of the address, and the branch
+   // itself.
+   using TEXT = uint32_t;
+   static constexpr int savecount = 5;
+#else
+   // For x86, we have variable width instructions, so deal with them as bytes.
+   // For 32-bit, we need a single byte for the call opcode, and an address.
+   // For 64-bit, we need a move-to-register, and jump-to-register, taking 13
+   // bytes total.
+   using TEXT = unsigned char;
+   static constexpr int savecount = __WORDSIZE == 32 ? 5 : 13;
+#endif
+   TEXT enableCode[ savecount ];
+   TEXT disableCode[ savecount ];
 
-   // the original code that was contained in the bytes above.
-   char disableCode[ savesize ];
    void * location; // the location in memory where we should do our stomping.
 
  protected:
@@ -402,12 +419,30 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
     * save the first 5 bytes of the function, and generate code for a jmp
     * instruction to the callback.
     */
-   unsigned char * insns = ( unsigned char * )location;
-   memcpy( disableCode, insns, savesize );
+   memcpy( disableCode, location, sizeof disableCode );
+#ifdef __aarch64__
+   uintptr_t jmploc = ( uintptr_t )callback;
+
+   // mov x9, (bits 0-15 of jmploc )
+   enableCode[0] = 0xd2800000 | ( ( jmploc & 0xffff ) << 5 ) | 9;
+
+   // movk x9, (bits 16-31 of jmploc), LSL#16  (hw=1)
+   enableCode[1] = 0xf2800000 | (1 << 21) | ( ( jmploc >> 16 ) & 0xffff ) << 5 | 9;
+
+   // movk x9, (bits 32-47 of jmploc), LSL#32  (hw=2)
+   enableCode[2] = 0xf2800000 | (2 << 21) | ( ( jmploc >> 32 ) & 0xffff ) << 5 | 9;
+
+   // movk x9, (bits 48-63 of jmploc), LSL#48 (hw=3)
+   enableCode[3] = 0xf2800000 | (3 << 21) | ( ( jmploc >> 48 ) & 0xffff ) << 5 | 9;
+
+   // br x9
+   enableCode[4] = 0xd61f0000 |(9 << 5);
+
+#else
    if ( __WORDSIZE == 32 ) {
       enableCode[ 0 ] = 0xe9;
       // Calculate relative offset of jmp instruction, and insert that into our insn.
-      uintptr_t jmploc = ( unsigned char * )callback - ( insns + 5 );
+      uintptr_t jmploc = ( TEXT * )callback - ( TEXT * )location - 5;
       memcpy( enableCode + 1, &jmploc, sizeof jmploc );
    } else {
       // movabsq <callback>, %r11
@@ -419,6 +454,7 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
       enableCode[ 11 ] = 0xff;
       enableCode[ 12 ] = 0xe3;
    }
+#endif
 }
 
 void
@@ -426,6 +462,11 @@ StompMock::setState( bool state ) {
    protect( PROT_READ | PROT_WRITE, location, sizeof enableCode );
    memcpy( location, state ? enableCode : disableCode, sizeof enableCode );
    protect( PROT_READ | PROT_EXEC, location, sizeof enableCode );
+   // Because we've updated the text, we need to ensure the icache and dcache are
+   // coherent. This matters for aarch64.
+   char *start = ( char * )location;
+   char *end = start + sizeof enableCode;
+   __builtin___clear_cache( start, end );
 }
 
 /*

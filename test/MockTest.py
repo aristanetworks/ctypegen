@@ -19,7 +19,6 @@ import ctypes
 from CTypeGen import generate
 import CMock
 import gc
-import platform
 
 if len( sys.argv ) >= 2:
    mocklib = sys.argv[ 1 ]
@@ -127,22 +126,23 @@ checkMocked()
 
 # Test STOMP mocks - mock out "g" called by "entry_g". The real g return 42,
 # the mocked one returns 99, and entry_g asserts g returns whatever is psased
-# to entry_g
+# to entry_g. We run the test multiple times to ensure it's reliable - this
+# test failed about 7% of the time on aarch64 without the
+# __builtin___clear_cache needed when scribbling on the text of functions
 
-if platform.machine() != 'aarch64': # A4NOCHECK: "64" != "aarch64"
-   print( "checking STOMP mock" )
+print( "checking STOMP mock" )
 
-   @CMock.Mock( lib.g, method=CMock.STOMP )
-   def mockedG( i, s ):
-      print( "this is the mocked g %d/%s" % ( i, s ) )
-      assert( s == b"forty-two" and i == 42 )
-      return 99
+@CMock.Mock( lib.g, method=CMock.STOMP )
+def mockedG( i, s ):
+   print( "this is the mocked g %d/%s" % ( i, s ) )
+   assert( s == b"forty-two" and i == 42 )
+   return 99
 
+for _ in range(16):
    lib.entry_g( 99 )
    mockedG.disable()
    lib.entry_g( 42 )
-else:
-   print( "STOMP mocks not supported on aarch64" )
+   mockedG.enable()
 
 print( "check calls to C++ functions via name demangling" )
 function = CMock.mangleFunc( lib, "A::Cpp::Namespace::withAFunction",
