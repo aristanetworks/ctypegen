@@ -1,4 +1,4 @@
-#!/usr/bin/env arista-python
+#!/usr/bin/env python
 # Copyright (c) 2021 Arista Networks, Inc.  All rights reserved.
 # Arista Networks, Inc. Confidential and Proprietary.
 

@@ -26,6 +26,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <sstream>
 
 #include <string.h>
 #include <assert.h>
@@ -410,9 +411,23 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
    /* find the symbol for this function. */
    location = dlsym( lib, name );
    if ( !location ) {
-      std::cerr << "no symbol found for " << name << ", handle " << handle << ": "
-                << dlerror() << std::endl;
-      throw std::exception();
+      std::ostringstream os;
+      os << "no symbol found for " << name << ", handle " << handle << ": "
+         << dlerror() << std::endl;
+      throw std::runtime_error( os.str() );
+   }
+
+   // Try to ensure the function is big enough to mock - Use dladdr1 to find
+   // the symbol, and, if we can, and it has a non-zero size, make sure it's at
+   // least as large as our stomp jumping code.
+   Dl_info info;
+   ElfW(Sym) *sym;
+   int rc = dladdr1( location, &info, (void **)&sym, RTLD_DL_SYMENT );
+   if ( rc != -1 && sym->st_size && sym->st_size < sizeof enableCode ) {
+      std::ostringstream os;
+      os << "function '" <<  name << "' is to small (" << sym->st_size
+         << " bytes) to mock - it must be at least " << sizeof enableCode;
+      throw std::runtime_error( os.str() );
    }
 
    /*
@@ -484,24 +499,43 @@ newMock( PyTypeObject * subtype, PyObject * args, PyObject * kwds ) {
 
    if ( !PyArg_ParseTuple( args, "s#LL", &name, &namelen, &callback, &handle ) )
       return nullptr;
-   new ( obj ) MockType( name, ( void * )callback, ( void * )handle );
-   return reinterpret_cast< PyObject * >( obj );
+   try {
+      new ( obj ) MockType( name, ( void * )callback, ( void * )handle );
+      return reinterpret_cast< PyObject * >( obj );
+   }
+   catch (const std::exception &ex) {
+      subtype->tp_free( obj );
+      PyErr_SetString( PyExc_RuntimeError, ex.what() );
+      return nullptr;
+   }
 }
 
 template< typename T >
 static PyObject *
 enableMock( PyObject * self, PyObject * args ) {
    auto * mock = reinterpret_cast< T * >( self );
-   enableMock( mock );
-   Py_RETURN_NONE;
+   try {
+      enableMock( mock );
+      Py_RETURN_NONE;
+   }
+   catch (const std::exception &ex) {
+      PyErr_SetString( PyExc_RuntimeError, ex.what() );
+      return nullptr;
+   }
 }
 
 template< typename T >
 static PyObject *
 disableMock( PyObject * self, PyObject * args ) {
    auto * mock = reinterpret_cast< T * >( self );
-   disableMock( mock );
-   Py_RETURN_NONE;
+   try {
+      disableMock( mock );
+      Py_RETURN_NONE;
+   }
+   catch (const std::exception &ex) {
+      PyErr_SetString( PyExc_RuntimeError, ex.what() );
+      return nullptr;
+   }
 }
 
 template< typename T >
@@ -516,9 +550,14 @@ static void
 freeMock( PyObject * self ) {
    auto t = reinterpret_cast< T * >( self );
    auto typ = Py_TYPE( self );
-   disableMock( t );
-   t->~T();
-   typ->tp_free( t );
+   try {
+      disableMock( t );
+      t->~T();
+      typ->tp_free( t );
+   }
+   catch (const std::exception &ex) {
+      PyErr_SetString( PyExc_RuntimeError, ex.what() );
+   }
 }
 
 /*
@@ -641,8 +680,6 @@ cmock_mangle( PyObject * self, PyObject * args ) {
    // are actually contiguous anyhow.
 
    auto processSymbol = [ & ]( const Elf_Sym & sym ) {
-      auto tuple = PyTuple_New( 2 );
-
       assert( sym.st_shndx != SHN_UNDEF );
       auto name = strings + sym.st_name;
       if ( name[ 0 ] != '_' || name[ 1 ] != 'Z' )
@@ -656,9 +693,13 @@ cmock_mangle( PyObject * self, PyObject * args ) {
       int rc = regexec( &regex, demangled, 0, nullptr, 0 );
       if ( rc != 0 )
          return;
-      PyTuple_SetItem( tuple, 0, PyUnicode_FromString( demangled ) );
-      PyTuple_SetItem( tuple, 1, PyUnicode_FromString( name ) );
+      auto pyname = PyUnicode_FromString( name );
+      auto pydemangled = PyUnicode_FromString( demangled );
+      auto tuple = PyTuple_New( 2 );
+      PyTuple_SetItem( tuple, 0, pydemangled );
+      PyTuple_SetItem( tuple, 1, pyname );
       PyList_Append( list, tuple );
+      Py_DECREF( tuple );
    };
 
    if ( gnu_hash != nullptr ) {

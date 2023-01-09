@@ -23,6 +23,7 @@ extern int g( int ival, const char * sval );
 extern void entry( int expect_return, int expect_i );
 extern void entry_g( int expect_return );
 int callCpp( int a, int b );
+int tiny();
 }
 
 namespace A {
@@ -55,6 +56,12 @@ void
 entry_g( int expect_return ) {
    int rc = g( 42, "forty-two" );
    assert( rc == expect_return );
+}
+
+// we can't mock this, it's too small. Make sure we don't crash
+int
+tiny() {
+   return 42;
 }
 
 int

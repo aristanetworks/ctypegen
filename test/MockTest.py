@@ -19,6 +19,7 @@ import ctypes
 from CTypeGen import generate
 import CMock
 import gc
+import platform
 
 if len( sys.argv ) >= 2:
    mocklib = sys.argv[ 1 ]
@@ -29,7 +30,7 @@ else:
 module, resolver = generate( mocklib,
                              "proggen.py",
                              [],
-                             [ "f", "g", "entry", "entry_g" ] )
+                             [ "f", "g", "entry", "entry_g", "tiny" ] )
 
 # Load the DLL, and decorate the functions with their prototypes.
 # We use RTLD_GLOBAL so the mocking framework does not need to be passed the
@@ -143,6 +144,20 @@ for _ in range(16):
    mockedG.disable()
    lib.entry_g( 42 )
    mockedG.enable()
+
+# Make sure if we attempt to mock a really small function (smaller than our
+# jump code), that we fail cleanly.
+#
+# On i686, PIC code uses the function prologue to find the GOT by calling a
+# function to find EIP, and adding an offset to the resulting value. That alone
+# is bigger than our "stomp" jump code, so we can't tickle this failure on that
+# platform
+if platform.machine() != 'i686': # A4NOCHECK - I don't mean 32-bit, I mean i686.
+   try:
+      mock = CMock.mocked( lib.tiny, lambda x: 42, method=CMock.STOMP )
+      assert False, "should not be able to mock this tiny function"
+   except RuntimeError as ex:
+      print( "successfully caught exception: %s" % ex )
 
 print( "check calls to C++ functions via name demangling" )
 function = CMock.mangleFunc( lib, "A::Cpp::Namespace::withAFunction",
