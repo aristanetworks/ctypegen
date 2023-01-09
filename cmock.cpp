@@ -277,7 +277,7 @@ PreMock::callbackFor( void * got, void * func ) {
       void ** bufp = ( void ** )p;
       memcpy( p, cmock_thunk_function, cmock_thunk_end - cmock_thunk_function );
 
-#ifdef __LP64__
+#if defined(__LP64__)
       bufp[ 1020 ] = &bufp[ 1019 ];
       bufp[ 1021 ] = got;
       bufp[ 1022 ] = callback;
