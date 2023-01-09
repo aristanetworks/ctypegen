@@ -20,6 +20,10 @@
 // We also grab lots of macros from these files for general use.
 #define _GNU_SOURCE
 
+#ifdef _FILE_OFFSET_BITS
+#undef _FILE_OFFSET_BITS
+#endif
+
 #include <sys/auxv.h>
 #include <sys/dir.h>
 #include <sys/fcntl.h>

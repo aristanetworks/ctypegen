@@ -106,6 +106,7 @@ def _decorateSyscalls( libc ):
    proto( c_int, libc.getppid, [] )
    proto( c_int, libc.listen, [ c_int, c_int ] )
    proto( c_int, libc.open, [ c_char_p, c_int, c_int ] )
+   proto( c_int, libc.open64, [ c_char_p, c_int, c_int ] )
 
 def getLibc():
    ''' load and decorate libc functions. Returns reference to libc, and the
