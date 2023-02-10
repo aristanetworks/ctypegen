@@ -104,7 +104,7 @@ class MemoryProtection {
       uintptr_t low;
       int prot;
    };
-   std::map< ElfW( Addr ), ProtRange > ranges;
+   std::map< uintptr_t, ProtRange > ranges;
 
  public:
    MemoryProtection();
@@ -126,7 +126,7 @@ MemoryProtection::MemoryProtection() {
    for ( char buf[ 1024 ]; fgets( buf, sizeof buf, procSelfMaps ); ) {
       std::istringstream ls{ buf };
       std::string prot;
-      ElfW( Addr ) from, to;
+      uintptr_t from, to;
       char _;
       ls >> std::hex >> from >> _ >> to >> prot;
       int protv = 0;
@@ -153,7 +153,7 @@ MemoryProtection::MemoryProtection() {
 
 int
 MemoryProtection::protectionFor( void * loc ) const {
-   auto pi = ElfW( Addr )( loc );
+   auto pi = uintptr_t( loc );
 
    auto range = ranges.upper_bound( pi );
    if ( range != ranges.end() && range->second.low <= pi ) {
@@ -246,16 +246,16 @@ class Replacement {
    ElfW( Rela ) relocation;
 
  public:
-   const ElfW( Addr ) address; // relocation offset + loadaddr.
-   const ElfW( Addr ) original;
+   const uintptr_t address; // relocation offset + loadaddr.
+   const uintptr_t original; // original content saved from `address`
    // set the address to refer to the specified address, performing whatever
    // activity the relocation type requires.
-   void set( const MemoryProtection &, ElfW( Addr ) ) const;
+   void set( const MemoryProtection &, uintptr_t ) const;
    void reset( const MemoryProtection & ); // replace original content.
-   Replacement( ElfW( Rela ) rela, ElfW( Addr ) address )
+   Replacement( ElfW( Rela ) rela, uintptr_t address )
          : relocation( rela ),
            address( address ),
-           original( *reinterpret_cast< ElfW( Addr ) * >( address ) ) {}
+           original( *reinterpret_cast< uintptr_t * >( address ) ) {}
 };
 
 class GOTMock : protected Mock {
@@ -274,7 +274,7 @@ class GOTMock : protected Mock {
    void processLibrary( const MemoryProtection &,
                         const char *,
                         ElfW( Dyn ) * dynamic,
-                        ElfW( Addr ) loadaddr,
+                        uintptr_t loadaddr,
                         const char * function );
    static ElfW( Rela ) asAddend( const ElfW( Rel ) & rel ) {
       ElfW( Rela ) rela;
@@ -316,7 +316,7 @@ class GOTMock : protected Mock {
 
    template< typename reltype >
    int processRelocs( const MemoryProtection &,
-                      ElfW( Addr ) loadaddr,
+                      uintptr_t loadaddr,
                       const reltype * relocs,
                       size_t reloclen,
                       const ElfW( Sym ) * symbols,
@@ -415,7 +415,7 @@ GOTMock::GOTMock( const char * name_, void * callback_, void * handle )
 template< typename reltype >
 int
 GOTMock::processRelocs( const MemoryProtection & addressSpace,
-                        ElfW( Addr ) loadaddr,
+                        uintptr_t loadaddr,
                         const reltype * relocs,
                         size_t reloclen,
                         const ElfW( Sym ) * symbols,
@@ -431,7 +431,7 @@ GOTMock::processRelocs( const MemoryProtection & addressSpace,
       const char * name = strings + sym.st_name;
       // If we find the funciton we want, update the GOT entry with ptr to our code.
       if ( strcmp( name, function ) == 0 ) {
-         ElfW( Addr ) loc = reloc.r_offset + loadaddr;
+         uintptr_t loc = reloc.r_offset + loadaddr;
          replacements.emplace_back( asAddend( reloc ), loc );
          ++count;
       }
@@ -486,7 +486,7 @@ is_abs_reloc( int reloc_type ) {
 
 void
 Replacement::set( const MemoryProtection & addressSpace,
-                  ElfW( Addr ) content ) const {
+                  uintptr_t content ) const {
    MakeWriteable here( addressSpace, ( void * )address, sizeof content );
    auto rtype = ELF_R_TYPE( relocation.r_info );
    if ( is_abs_reloc( rtype ) ) {
@@ -494,14 +494,14 @@ Replacement::set( const MemoryProtection & addressSpace,
       // nomenclature of the ELF standard, we have "A"ddend, "S"ymbol and
       // "P"lace, we expect the value at "P" to be assigned the value of "S"
       // the value placed is "S"
-      *( ElfW( Addr ) * )address = content + relocation.r_addend;
+      *( uintptr_t * )address = content + relocation.r_addend;
    } else {
       // Deal with other types of relocations, on various platforms, where we
       // need to do something cleverer
 #if defined( __i386__ )
       switch ( rtype ) {
        case R_386_PC32:
-         *( ElfW( Addr ) * )address = content - address + relocation.r_addend;
+         *( uintptr_t * )address = content - address + relocation.r_addend;
          break;
        default:
          throw std::runtime_error( "unsupported relocation type" );
@@ -516,7 +516,7 @@ Replacement::set( const MemoryProtection & addressSpace,
 void
 Replacement::reset( const MemoryProtection & addressSpace ) {
    MakeWriteable here( addressSpace, ( void * )address, sizeof original );
-   *( ElfW( Addr ) * )address = original;
+   *( uintptr_t * )address = original;
 }
 
 /*
@@ -528,7 +528,7 @@ PreMock::enable() {
    for ( auto & replacement : replacements ) {
       auto code = callbackFor( ( void * )replacement.address,
                                ( void * )replacement.original );
-      replacement.set( addressSpace, ( ElfW( Addr ) )code );
+      replacement.set( addressSpace, ( uintptr_t )code );
    }
 }
 
@@ -539,7 +539,7 @@ void
 GOTMock::enable() {
    MemoryProtection addressSpace;
    for ( auto & replacement : replacements ) {
-      replacement.set( addressSpace, ( ElfW( Addr ) )callback );
+      replacement.set( addressSpace, ( uintptr_t )callback );
    }
 }
 
@@ -564,7 +564,7 @@ void
 GOTMock::processLibrary( const MemoryProtection & addressSpace,
                          const char * libname,
                          ElfW( Dyn ) * dynamic,
-                         ElfW( Addr ) loadaddr,
+                         uintptr_t loadaddr,
                          const char * function ) {
    int reltype = -1;
    ElfW( Rel ) * jmprel = 0, *rel = 0;
