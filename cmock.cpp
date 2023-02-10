@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <vector>
 
 #include <string.h>
 #include <assert.h>
@@ -42,12 +43,14 @@
 
 #if __WORDSIZE == 32
 #define ELF_R_SYM( reloc ) ELF32_R_SYM( reloc )
+#define ELF_R_TYPE( reloc ) ELF32_R_TYPE( reloc )
 typedef Elf32_Sym Elf_Sym;
 typedef Elf32_Dyn Elf_Dyn;
 typedef Elf32_Ehdr Elf_Ehdr;
 typedef Elf32_Shdr Elf_Shdr;
 #else
 #define ELF_R_SYM( reloc ) ELF64_R_SYM( reloc )
+#define ELF_R_TYPE( reloc ) ELF64_R_TYPE( reloc )
 typedef Elf64_Sym Elf_Sym;
 typedef Elf64_Dyn Elf_Dyn;
 typedef Elf64_Ehdr Elf_Ehdr;
@@ -67,6 +70,11 @@ struct gnu_hash_table {
 #endif
 };
 
+extern char cmock_thunk_function[];
+extern char cmock_thunk_end[];
+
+namespace {
+
 static inline const long *
 gnu_hash_bloom( const gnu_hash_table * table, size_t idx ) {
    const long * ptr = ( const long * )( table + 1 );
@@ -81,6 +89,77 @@ gnu_hash_bucket( const gnu_hash_table * table, size_t idx ) {
 static inline const uint32_t *
 gnu_hash_chain( const gnu_hash_table * table, size_t idx ) {
    return gnu_hash_bucket( table, table->nbuckets ) + idx - table->symoffset;
+}
+
+/* This is a cache of the data from /proc/self/maps that gives us the memory
+ * protection for each span therein. When iterating over all the shared
+ * libraries, and all the relocs therein, we cache this information once.
+ */
+class MemoryProtection {
+   // "ranges" maps the beginning and end of a range, and gives its protection
+   // mode. The key to the map is the end of the range, and we store the start
+   // in the value. This makes std::map::upper_bound an easy way to find the
+   // relevant entry
+   struct ProtRange {
+      uintptr_t low;
+      int prot;
+   };
+   std::map< ElfW( Addr ), ProtRange > ranges;
+
+ public:
+   MemoryProtection();
+   int protectionFor(
+      void * arg ) const; // return the protection for the address arg.
+};
+
+MemoryProtection::MemoryProtection() {
+   // We use fopen/fclose rather than going through the C++ standard library.
+   // For now, we excuse the shared libraries for libc, python, and this
+   // extension module when enabling mocks, so this module and the python
+   // interpreter can safely call functions in those libraries without fear of
+   // unexpectedly ending up back in the python interpreter (either directly,
+   // or from libc calling one of its own internal functions that have been
+   // mocked). We could also excuse libstdc++, but there's no compelling need
+   // to do that yet
+
+   FILE * procSelfMaps = fopen( "/proc/self/maps", "r" );
+   for ( char buf[ 1024 ]; fgets( buf, sizeof buf, procSelfMaps ); ) {
+      std::istringstream ls{ buf };
+      std::string prot;
+      ElfW( Addr ) from, to;
+      char _;
+      ls >> std::hex >> from >> _ >> to >> prot;
+      int protv = 0;
+      for ( auto c : prot ) {
+         switch ( c ) {
+          case 'x':
+            protv |= PROT_EXEC;
+            break;
+          case 'r':
+            protv |= PROT_READ;
+            break;
+          case 'w':
+            protv |= PROT_WRITE;
+            break;
+          default:
+            break;
+         }
+      }
+      // Keyed by ending address for std::upper_bound
+      ranges[ to ] = { from, protv };
+   }
+   fclose( procSelfMaps );
+}
+
+int
+MemoryProtection::protectionFor( void * loc ) const {
+   auto pi = ElfW( Addr )( loc );
+
+   auto range = ranges.upper_bound( pi );
+   if ( range != ranges.end() && range->second.low <= pi ) {
+      return range->second.prot;
+   }
+   throw std::runtime_error( "no mapping for given address" );
 }
 
 /*
@@ -102,6 +181,27 @@ protect( int perms, void * p, size_t len ) {
       abort();
    }
 }
+
+// An RAII object to make a specific address range writeable while in scope. It
+// also performs a cache flush when making the memory readable again, to ensure
+// the instruction cache is up to date with the data writes.
+struct MakeWriteable {
+   void * start;
+   size_t len;
+   int origProt;
+   MakeWriteable( const MemoryProtection & prot, void * start_, size_t len_ )
+         : start( start_ ),
+           len( len_ ),
+           origProt( prot.protectionFor( start ) ) {
+      protect( PROT_READ | PROT_WRITE, start, len );
+   }
+   ~MakeWriteable() {
+      protect( origProt, start, len );
+      // Because we've updated the text, we need to ensure the icache and dcache are
+      // coherent. This matters for aarch64.
+      __builtin___clear_cache( (char *)start, ( char * )start + len );
+   }
+};
 
 /*
  * We have two separate mocking implementations - one that overwrites all GOT
@@ -138,12 +238,32 @@ struct Mock {
    Mock() : enableCount{ 0 } {}
 };
 
+// This contains the information necessary to refer to an address at a position
+// referred to by a relocation. It holds the relocation record from the ELF
+// image, the address to be relocated, and the original content of that address
+// before we messed with it
+class Replacement {
+   ElfW( Rela ) relocation;
+
+ public:
+   const ElfW( Addr ) address; // relocation offset + loadaddr.
+   const ElfW( Addr ) original;
+   // set the address to refer to the specified address, performing whatever
+   // activity the relocation type requires.
+   void set( const MemoryProtection &, ElfW( Addr ) ) const;
+   void reset( const MemoryProtection & ); // replace original content.
+   Replacement( ElfW( Rela ) rela, ElfW( Addr ) address )
+         : relocation( rela ),
+           address( address ),
+           original( *reinterpret_cast< ElfW( Addr ) * >( address ) ) {}
+};
+
 class GOTMock : protected Mock {
    friend void enableMock< GOTMock >( GOTMock * );
    friend void disableMock< GOTMock >( GOTMock * );
 
  protected:
-   std::map< ElfW( Addr ), void * > replaced;
+   std::vector< Replacement > replacements;
    void * callback;
    void enable();
    void disable();
@@ -151,25 +271,58 @@ class GOTMock : protected Mock {
  public:
    uintptr_t realaddr;
    GOTMock( const char * name_, void * callback_, void * handle_ );
-   void processLibrary( const char *,
+   void processLibrary( const MemoryProtection &,
+                        const char *,
                         ElfW( Dyn ) * dynamic,
                         ElfW( Addr ) loadaddr,
                         const char * function );
-   static void handleAddend( const ElfW( Rel ) & rel ) {}
-   static void handleAddend( const ElfW( Rela ) & rela ) {
-      assert( rela.r_addend == 0 );
-   }
-   template< typename reltype >
-   void findGotEntries( ElfW( Addr ) loadaddr,
-                        const reltype * relocs,
-                        size_t reloclen,
-                        const ElfW( Sym ) * symbols,
-                        const char * function,
-                        const char * strings );
-};
+   static ElfW( Rela ) asAddend( const ElfW( Rel ) & rel ) {
+      ElfW( Rela ) rela;
+      rela.r_offset = rel.r_offset;
+      rela.r_info = rel.r_info;
 
-extern char cmock_thunk_function[];
-extern char cmock_thunk_end[];
+#ifdef __i386__
+      // XXX: "-4" below is an assumption, but it's almost certainly correct.
+      //
+      // From the i386 ABI supplement:
+      // ```
+      //  The Intel386 architecture uses only Elf32_Rel relocation entries,
+      //  the field to be relocated holds the addend.
+      // ```
+      //
+      // i.e., the addend for an i386 relocation is held in the location to be
+      // relocated before it is relocated, not in the r_addend field that we'd
+      // have for a "rela" relocation. For call instructions, the 4 bytes after
+      // the "call" opcode are an address relative to the instruction pointer
+      // as it would notionally be just after the call instruction (i.e., the
+      // same as the value the call will push on the stack). Hence, the
+      // relative offset needs to be adjusted by subtracting 4 from the address
+      // of the relocation itself, so the shared object will generally have
+      // 0xfffffffc as offset for the call instruction.
+      //
+      // That value has been lost by the time we look at it when the loader
+      // originally resolved things, so just assume -4. If there's ever a
+      // reason to, we could map the page from the file, and check there, but
+      // it's a lot of work for no practical benefit.
+      rela.r_addend = ELF_R_TYPE( rel.r_info ) == R_386_PC32 ? -4 : 0;
+#else
+      rela.r_addend = 0;
+#endif
+      return rela;
+   }
+   static ElfW( Rela ) asAddend( const ElfW( Rela ) & rela ) {
+      return rela;
+   }
+
+   template< typename reltype >
+   int processRelocs( const MemoryProtection &,
+                      ElfW( Addr ) loadaddr,
+                      const reltype * relocs,
+                      size_t reloclen,
+                      const ElfW( Sym ) * symbols,
+                      const char * function,
+                      const char * strings );
+};
 
 class PreMock : public GOTMock {
    friend void enableMock< PreMock >( PreMock * );
@@ -248,24 +401,27 @@ class StompMock : protected Mock {
 GOTMock::GOTMock( const char * name_, void * callback_, void * handle )
       : callback( callback_ ) {
    // Override function in all libraries.
+   MemoryProtection addressSpace;
    for ( auto map = _r_debug.r_map; map; map = map->l_next )
-      processLibrary( map->l_name, map->l_ld, map->l_addr, name_ );
+      processLibrary( addressSpace, map->l_name, map->l_ld, map->l_addr, name_ );
    realaddr = ( uintptr_t )dlsym( handle, name_ );
 }
 
 /*
- * Locate GOT entries that refer to our function by name. This is templated to work
- * for ELF Rela and Rel locations. handleAddend is overloaded for each, and can
- * handle the addend parts for rela, if we ever care about them
+ * Locate relocation entries that refer to our function by name. This is
+ * templated to work for ELF Rela and Rel relocations. asAddend is overloaded
+ * for each to convert a REL reloc to a RELA reloc.
  */
 template< typename reltype >
-void
-GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
-                         const reltype * relocs,
-                         size_t reloclen,
-                         const ElfW( Sym ) * symbols,
-                         const char * function,
-                         const char * strings ) {
+int
+GOTMock::processRelocs( const MemoryProtection & addressSpace,
+                        ElfW( Addr ) loadaddr,
+                        const reltype * relocs,
+                        size_t reloclen,
+                        const ElfW( Sym ) * symbols,
+                        const char * function,
+                        const char * strings ) {
+   int count = 0;
    for ( int i = 0;; ++i ) {
       if ( ( char * )( relocs + i ) >= ( char * )relocs + reloclen )
          break;
@@ -276,11 +432,11 @@ GOTMock::findGotEntries( ElfW( Addr ) loadaddr,
       // If we find the funciton we want, update the GOT entry with ptr to our code.
       if ( strcmp( name, function ) == 0 ) {
          ElfW( Addr ) loc = reloc.r_offset + loadaddr;
-         void ** addr = reinterpret_cast< void ** >( loc );
-         handleAddend( reloc );
-         replaced[ loc ] = *addr;
+         replacements.emplace_back( asAddend( reloc ), loc );
+         ++count;
       }
    }
+   return count;
 }
 
 void *
@@ -315,15 +471,64 @@ PreMock::callbackFor( void * got, void * func ) {
    return thunk.get();
 }
 
+constexpr bool
+is_abs_reloc( int reloc_type ) {
+#if defined( __i386__ )
+   return reloc_type == R_386_32 || reloc_type == R_386_JMP_SLOT;
+#elif defined( __x86_64__ )
+   return reloc_type == R_X86_64_JUMP_SLOT;
+#elif defined( __aarch64__ )
+   return reloc_type == R_AARCH64_GLOB_DAT || reloc_type == R_AARCH64_JUMP_SLOT;
+#else
+#error "unsupported architecture"
+#endif
+}
+
+void
+Replacement::set( const MemoryProtection & addressSpace,
+                  ElfW( Addr ) content ) const {
+   MakeWriteable here( addressSpace, ( void * )address, sizeof content );
+   auto rtype = ELF_R_TYPE( relocation.r_info );
+   if ( is_abs_reloc( rtype ) ) {
+      // We deal mostly with absolute relocations, i.e., in the
+      // nomenclature of the ELF standard, we have "A"ddend, "S"ymbol and
+      // "P"lace, we expect the value at "P" to be assigned the value of "S"
+      // the value placed is "S"
+      *( ElfW( Addr ) * )address = content + relocation.r_addend;
+   } else {
+      // Deal with other types of relocations, on various platforms, where we
+      // need to do something cleverer
+#if defined( __i386__ )
+      switch ( rtype ) {
+       case R_386_PC32:
+         *( ElfW( Addr ) * )address = content - address + relocation.r_addend;
+         break;
+       default:
+         throw std::runtime_error( "unsupported relocation type" );
+      }
+#else
+      throw std::runtime_error( "unsupported relocation type" );
+
+#endif
+   }
+}
+
+void
+Replacement::reset( const MemoryProtection & addressSpace ) {
+   MakeWriteable here( addressSpace, ( void * )address, sizeof original );
+   *( ElfW( Addr ) * )address = original;
+}
+
 /*
  * Go over all the offsets in the GOT that refer to us, and patch in our mock.
  */
 void
 PreMock::enable() {
-   for ( auto & addr : replaced ) {
-      auto p = ( void ** )addr.first;
-      protect( PROT_READ | PROT_WRITE, p, sizeof callback );
-      *p = callbackFor( ( void * )addr.first, ( void * )addr.second );
+   MemoryProtection addressSpace;
+   for ( auto & replacement : replacements ) {
+      auto code = callbackFor( ( void * )replacement.address,
+                               ( void * )replacement.original );
+      replacement.set( addressSpace, ( ElfW( Addr ) )code );
    }
 }
 
@@ -332,10 +537,9 @@ PreMock::enable() {
  */
 void
 GOTMock::enable() {
-   for ( auto & addr : replaced ) {
-      auto p = ( void ** )addr.first;
-      protect( PROT_READ | PROT_WRITE, p, sizeof callback );
-      *p = callback;
+   MemoryProtection addressSpace;
+   for ( auto & replacement : replacements ) {
+      replacement.set( addressSpace, ( ElfW( Addr ) )callback );
    }
 }
 
@@ -345,8 +549,10 @@ GOTMock::enable() {
  */
 void
 GOTMock::disable() {
-   for ( auto & addr : replaced )
-      *( void ** )addr.first = addr.second;
+   MemoryProtection addressSpace;
+   for ( auto & replacement : replacements ) {
+      replacement.reset( addressSpace );
+   }
 }
 
 /*
@@ -355,29 +561,59 @@ GOTMock::disable() {
  * relocations for the named function in there.
  */
 void
-GOTMock::processLibrary( const char * libname,
+GOTMock::processLibrary( const MemoryProtection & addressSpace,
+                         const char * libname,
                          ElfW( Dyn ) * dynamic,
                          ElfW( Addr ) loadaddr,
                          const char * function ) {
    int reltype = -1;
-   ElfW( Rel ) * relocs = 0;
-   ElfW( Rela ) * relocas = 0;
-   ElfW( Word ) reloclen = -1;
+   ElfW( Rel ) * jmprel = 0, *rel = 0;
+   ElfW( Rela ) * jmprela = 0, *rela = 0;
+   ElfW( Word ) jmp_rel_len = -1, rel_len = -1;
    ElfW( Sym ) * symbols = 0;
    const char * strings = 0;
+   bool text_relocs = false;
+
+   // don't stub calls from libpython, libc, or ourselves.
+   if ( strstr( libname, "libpython" ) )
+      return;
+   if ( strstr( libname, "libCTypeMock" ) )
+      return;
+   if ( strstr( libname, "libc." ) )
+      return;
 
    for ( auto i = 0; dynamic[ i ].d_tag != DT_NULL; ++i ) {
       auto & dyn = dynamic[ i ];
       switch ( dyn.d_tag ) {
+       case DT_REL:
+         rel = ( ElfW( Rel ) * )( dyn.d_un.d_ptr );
+         break;
+       case DT_RELA:
+         rela = ( ElfW( Rela ) * )( dyn.d_un.d_ptr );
+         break;
+       case DT_RELSZ:
+         rel_len = dyn.d_un.d_val;
+         break;
+       case DT_RELASZ:
+         rel_len = dyn.d_un.d_val;
+         break;
+
+       case DT_TEXTREL:
+         // this is an indicator that there are text relocations present. This
+         // should only happen on i386, where you can dynamically link non-PIC
+         // code
+         text_relocs = true;
+         break;
+
        case DT_PLTREL:
          reltype = dyn.d_un.d_val;
          break;
        case DT_JMPREL:
-         relocas = ( ElfW( Rela ) * )( dyn.d_un.d_ptr );
-         relocs = ( ElfW( Rel ) * )( dyn.d_un.d_ptr );
+         jmprela = ( ElfW( Rela ) * )( dyn.d_un.d_ptr );
+         jmprel = ( ElfW( Rel ) * )( dyn.d_un.d_ptr );
          break;
        case DT_PLTRELSZ:
-         reloclen = dyn.d_un.d_val;
+         jmp_rel_len = dyn.d_un.d_val;
          break;
        case DT_STRTAB:
          strings = ( char * )( dyn.d_un.d_ptr );
@@ -390,13 +626,28 @@ GOTMock::processLibrary( const char * libname,
 
    switch ( reltype ) {
     case DT_REL:
-      findGotEntries( loadaddr, relocs, reloclen, symbols, function, strings );
+      processRelocs(
+         addressSpace, loadaddr, jmprel, jmp_rel_len, symbols, function, strings );
       break;
     case DT_RELA:
-      findGotEntries( loadaddr, relocas, reloclen, symbols, function, strings );
+      processRelocs(
+         addressSpace, loadaddr, jmprela, jmp_rel_len, symbols, function, strings );
       break;
     default:
       break;
+   }
+
+   if ( text_relocs ) {
+      // We really only will ever see "rel" here - i386 doesn't use rela, and
+      // we would not get both in the same ELF file anyway.
+      if ( rel ) {
+         processRelocs(
+            addressSpace, loadaddr, rel, rel_len, symbols, function, strings );
+      }
+      if ( rela ) {
+         processRelocs(
+            addressSpace, loadaddr, rela, rel_len, symbols, function, strings );
+      }
    }
 }
 
@@ -474,14 +725,9 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
 
 void
 StompMock::setState( bool state ) {
-   protect( PROT_READ | PROT_WRITE, location, sizeof enableCode );
+   MemoryProtection addressSpace;
+   MakeWriteable here( addressSpace, location, sizeof enableCode );
    memcpy( location, state ? enableCode : disableCode, sizeof enableCode );
-   protect( PROT_READ | PROT_EXEC, location, sizeof enableCode );
-   // Because we've updated the text, we need to ensure the icache and dcache are
-   // coherent. This matters for aarch64.
-   char *start = ( char * )location;
-   char *end = start + sizeof enableCode;
-   __builtin___clear_cache( start, end );
 }
 
 /*
@@ -740,6 +986,8 @@ static PyMethodDef mock_methods[] = {
      "convert regex for C++ function to mangled names" },
    { 0, 0, 0, 0 }
 };
+
+} // namespace
 
 /*
  * Initialize python library

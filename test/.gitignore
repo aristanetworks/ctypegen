@@ -8,3 +8,5 @@ GreedyTest.py
 premock.py
 ptrgen.py
 chaintest.py
+Demand.py
+Supply.py

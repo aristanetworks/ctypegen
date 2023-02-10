@@ -49,7 +49,7 @@ libEnumTest.so: EnumTest.o
 	$(CXX) -shared -o $@ $^
 
 check-bins: CTypeSanity MockTest libPreMockTest.so libChainTest.so libFOpenTest.so \
-   		libGreedyTest.so libEnumTest.so libSupply.so libDemand.so
+	libGreedyTest.so libEnumTest.so libSupply.so libDemand.so
 
 check-ctypesanity: check-bins
 	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
@@ -76,7 +76,17 @@ check-supplydemand: check-bins
 	$(PYTHON) ./SupplyDemandGen.py
 
 check: check-mock check-pre-mock check-ctypesanity check-chain  check-pointers \
-   	check-greedy check-enum check-supplydemand
+	check-greedy check-enum check-supplydemand
+
+# i386-only test.
+ifeq ($(shell uname -p),i686)
+textRelocs.o: CFLAGS=-g3 -m32
+libTextRelocs.so: textRelocs.o
+	$(CXX) -m32 -shared -o $@ $^
+check-textRelocs: libTextRelocs.so
+	$(PYTHON) ./TextRelocTest.py ./libTextRelocs.so
+check: check-textRelocs
+endif
 
 clean:
 	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py

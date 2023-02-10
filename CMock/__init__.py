@@ -46,6 +46,8 @@ cmockCdll.cfuncTypeToPtrToFunc.argtypes = [ c_void_p ]
 
 class mocked( object ):
    def __init__( self, function, python, library=None, method=GOT ):
+      # ensure a reference to "function" lives as long as the mock
+      self.function = function
       check_ctypes_decorations( function )
       linkername = function.__name__
       callbackReturnType = None if method == PRE else function.restype
