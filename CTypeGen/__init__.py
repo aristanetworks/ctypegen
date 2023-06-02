@@ -985,8 +985,9 @@ class PrimitiveType( Type ):
             if defn.DW_AT_byte_size == 16:
                return u'(c_double * 2 )'
             return u'(c_float * 2 )'
-
-         raise Exception( "no python ctype for primitive C type %s" % name )
+         # if we can't parse the primitive type, just treat it as an array of
+         # bytes.
+         return f"(c_byte * {self.die.DW_AT_byte_size})"
       return PrimitiveType.baseTypes[ name ][ 0 ]
 
 

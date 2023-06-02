@@ -36,11 +36,9 @@ if platform.machine() == "aarch64": # A4NOCHECK want CPU arch, not size.
          "__prfpregset_t",
          "elf_fpregset_t",
          "fpregset_t",
-         "link_map",
          "mcontext_t",
          "prfpregset_t",
          "pthread",
-         "rtld_global",
          "sigcontext",
          "struct_user_fpsimd_struct",
          "ucontext_t",
@@ -57,7 +55,6 @@ elif platform.machine() == "x86_64": # A4NOCHECK, want CPU arch, not size.
          "__dirstream",
          "epoll_data",
          "helper_file",
-         "link_map",
          "pthread",
          "stackblock",
          ]
@@ -87,7 +84,9 @@ broken = {  ( n, ) for n in [
       "printf_info",
       "printf_spec",
       "raise", # python keyword.
-       ] + platformBroken  }
+      "link_map",
+      "rtld_global", # embeds link_map
+       ] + platformBroken }
 
 def haveDyn( die ):
    ''' Filter for functions that are in the .dynsym section - we can't call
