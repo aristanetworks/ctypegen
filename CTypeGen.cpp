@@ -728,6 +728,18 @@ elf_findDefinition( PyObject * self, PyObject * args ) {
    return Py_None;
 }
 
+static PyObject *
+elf_flush( PyObject * self, PyObject * args ) {
+   try {
+      PyElfObject * elf = ( PyElfObject * )self;
+      imageCache.flush( elf->obj );
+   } catch ( std::exception & ex ) {
+      PyErr_SetString( PyExc_RuntimeError, ex.what() );
+      return nullptr;
+   }
+   Py_RETURN_NONE;
+}
+
 static void
 elf_free( PyObject * o ) {
    PyElfObject * pye = ( PyElfObject * )o;
@@ -738,6 +750,13 @@ elf_free( PyObject * o ) {
       Py_DECREF( pye->dynaddrs );
    elfObjectType.tp_free( o );
 }
+
+static int
+units_asnumber_bool( PyObject * o ) {
+   PyUnits * pye = ( PyUnits * )o;
+   return pye->units.begin() == pye->units.end() ? 0 : 1;
+};
+
 
 static void
 units_free( PyObject * o ) {
@@ -1093,19 +1112,36 @@ static PyMethodDef ctypegen_methods[] = {
 
 static PyMethodDef elf_methods[] = {
    { "units", elf_units, METH_VARARGS, "get a list of unit-level DWARF entries" },
-   { "soname", elf_soname, METH_VARARGS,
-                  "get the name of this library as used to locate it at run-time" },
-   { "dynaddrs", elf_dynaddrs, METH_VARARGS,
-                 "get a mapping of addr->dynamic symbol name" },
-   { "symbol", elf_symbol, METH_VARARGS,
-                 "get address of symbol" },
-   { "findDefinition", elf_findDefinition, METH_VARARGS,
-                 "Given a DIE for a declaration, find "
-                 "a definition DIE with the same name" },
+   { "soname",
+     elf_soname,
+     METH_VARARGS,
+     "get the name of this library as used to locate it at run-time" },
+   { "dynaddrs",
+     elf_dynaddrs,
+     METH_VARARGS,
+     "get a mapping of addr->dynamic symbol name" },
+   { "symbol", elf_symbol, METH_VARARGS, "get address of symbol" },
+   { "findDefinition",
+     elf_findDefinition,
+     METH_VARARGS,
+     "Given a DIE for a declaration, find "
+     "a definition DIE with the same name" },
+   { "flush",
+     elf_flush,
+     METH_VARARGS,
+     "flush this object from the cache of objects." },
    { 0, 0, 0, 0 }
 };
 
 static PyMethodDef units_methods[] = { { 0, 0, 0, 0 } };
+
+static PyNumberMethods units_asnumber = {
+#if PY_MAJOR_VERSION >= 3
+   .nb_bool = units_asnumber_bool
+#else
+   .nb_nonzero = units_asnumber_bool
+#endif
+};
 
 static PyMethodDef unit_methods[] = {
    { "root", unit_root, METH_VARARGS, "get root DIE of a unit" },
@@ -1206,6 +1242,7 @@ initlibCTypeGen( void )
    unitsType.tp_doc = "ELF object's DWARF units";
    unitsType.tp_dealloc = units_free;
    unitsType.tp_iter = units_iterator;
+   unitsType.tp_as_number = &units_asnumber;
 
    unitsIteratorType.tp_name = "libCTypeGen.UnitsIterator";
    unitsIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;
