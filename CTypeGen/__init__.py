@@ -154,7 +154,13 @@ class Type:
    ]
 
    def __lt__( self, rhs ):
-      return self.die.fullname() < rhs.die.fullname()
+      lname = self.die.fullname()
+      rname = rhs.die.fullname()
+      # If the names are the same, we still need to distinguish the types - do
+      # so by tag.
+      if lname == rname:
+         return self.die.tag() < rhs.die.tag()
+      return lname < rname
 
    def alignment( self ):
       base = self.baseType()
@@ -1464,7 +1470,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 
 ''' )
 
-      for pkg in self.existingTypes:
+      for pkg in sorted( self.existingTypes, key=str ):
          stream.write( "import %s\n" % pkg.__name__ )
       stream.write( "\n" )
 
@@ -1477,7 +1483,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          else:
             self.defineType( self.dieToType( die.DW_AT_type ), stream )
 
-      for name, die in iteritems( self.functions ):
+      for name, die in sorted( iteritems( self.functions ) ):
          if die:
             self.dieToType( die ).define( stream )
          else:
@@ -1490,7 +1496,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          self.defineTypes = set()
          if not types:
             break
-         for t in types:
+         for t in sorted( types ):
             self.defineType( t, stream )
 
       # For any PythonType hints, if the cName != the desired python name, then
@@ -1504,9 +1510,9 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 
       # If tagged types don't conflict with untagged, we can make aliases without
       # the tag prefix
-      for name, byTag in self.types.items():
+      for name, byTag in sorted( self.types.items() ):
          if len( byTag ) == 1:
-            for tag, typ in byTag.items():
+            for tag, typ in sorted( byTag.items() ):
                if not isinstance( typ, ExternalType ) and \
                         typ.defined and tag in TAGGED_ELEMENTS:
                   stream.write( f"{typ.pyName( False )} = {typ.pyName( True )} "
@@ -1547,7 +1553,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 
       if ctypesProtos:
          stream.write( "\nfunctionTypes = {\n" )
-         for funcName, proto in ctypesProtos.items():
+         for funcName, proto in sorted( ctypesProtos.items() ):
             stream.write( f"   '{funcName}': {proto},\n" )
          stream.write( "}" )
 

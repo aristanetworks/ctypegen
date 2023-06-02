@@ -676,7 +676,7 @@ StompMock::StompMock( const char * name, void * callback, void * handle ) {
    int rc = dladdr1( location, &info, (void **)&sym, RTLD_DL_SYMENT );
    if ( rc != -1 && sym->st_size && sym->st_size < sizeof enableCode ) {
       std::ostringstream os;
-      os << "function '" <<  name << "' is to small (" << sym->st_size
+      os << "function '" <<  name << "' is too small (" << sym->st_size
          << " bytes) to mock - it must be at least " << sizeof enableCode;
       throw std::runtime_error( os.str() );
    }
