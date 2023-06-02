@@ -993,13 +993,8 @@ static PyMethodDef mock_methods[] = {
  * Initialize python library
  */
 PyMODINIT_FUNC
-#if PY_MAJOR_VERSION >= 3
 PyInit_libCTypeMock( void )
-#else
-initlibCTypeMock( void )
-#endif
 {
-#if PY_MAJOR_VERSION >= 3
    static struct PyModuleDef ctypeMockModule = {
       PyModuleDef_HEAD_INIT,
       "libCTypeMock", /* m_name */
@@ -1012,10 +1007,6 @@ initlibCTypeMock( void )
       NULL, /* m_free */
    };
    PyObject * module = PyModule_Create( &ctypeMockModule );
-#else
-   PyObject * module =
-      Py_InitModule3( "libCTypeMock", mock_methods, "CTypeMock C support" );
-#endif
    populateType< StompMock >(
       module, stompObjectType, "StompMock", "A stomping mock" );
    populateType< GOTMock >(
@@ -1023,9 +1014,7 @@ initlibCTypeMock( void )
    populateType< PreMock >(
       module, preObjectType, "PreMock", "A pre-executing GOT hijacking mock" );
 
-#if PY_MAJOR_VERSION >= 3
    return module;
-#endif
 }
 
 /*

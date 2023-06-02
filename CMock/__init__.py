@@ -11,7 +11,6 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-from __future__ import absolute_import, division, print_function
 
 import sys
 from ctypes import CDLL, CFUNCTYPE, c_void_p, cast
@@ -44,7 +43,7 @@ assert cmockCdll
 cmockCdll.cfuncTypeToPtrToFunc.restype = c_void_p
 cmockCdll.cfuncTypeToPtrToFunc.argtypes = [ c_void_p ]
 
-class mocked( object ):
+class mocked:
    def __init__( self, function, python, library=None, method=GOT ):
       # ensure a reference to "function" lives as long as the mock
       self.function = function
@@ -84,7 +83,7 @@ class mocked( object ):
    def __exit__( self, *kwargs ):
       self.disable()
 
-class Mock( object ):
+class Mock:
    ''' A decorator to have a python function replace a C function in a process
    Pass it a reference to the funciton, and the library in which you want to
    find and mock it. The function handle should have already had restype and

@@ -1,7 +1,17 @@
-# Copyright (c) 2021 Arista Networks, Inc.  All rights reserved.
-# Arista Networks, Inc. Confidential and Proprietary.
+# Copyright 2021 Arista Networks.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+#     Unless required by applicable law or agreed to in writing, software
+#     distributed under the License is distributed on an "AS IS" BASIS,
+#     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#     See the License for the specific language governing permissions and
+#     limitations under the License.
 
-from __future__ import absolute_import, division, print_function
 import sys
 import ast
 import token
@@ -13,7 +23,7 @@ PY3 = sys.version_info.major >= 3
 if PY3:
    TokenInfo = tokenize.TokenInfo # for python2: pylint: disable=no-member
 else:
-   class TokenInfo(object):
+   class TokenInfo:
       def __init__( self, tup ):
          self.type, self.string, self.start, self.end, self.line = tup
       def __repr__( self ):
@@ -22,7 +32,7 @@ else:
                         self.end, self.line ) )
 
 # Act like readline for a fixed string.
-class Reader( object ):
+class Reader:
    def __init__( self, text ):
       if PY3 and isinstance( text, str ):
          self.text = text.encode("utf-8")
@@ -57,7 +67,7 @@ def clean( input_ ):
 
    # Step one - lexical cleanup.
    try:
-      kill_suffixes = set( [ "UL", "U", "ULL", "L", "LL" ] )
+      kill_suffixes = {  "UL", "U", "ULL", "L", "LL"  }
       output = ''
       prev_tok = None
       for tok in getTokens(input_):

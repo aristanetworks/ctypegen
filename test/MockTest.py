@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2018 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,7 +12,6 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-from __future__ import absolute_import, division, print_function
 
 import sys
 import ctypes
@@ -97,7 +96,7 @@ print( "check mocked member function" )
 # Uses the same logic as mockedF above - make sure we can call instance methods
 # as if they were C functions.
 
-class MockObject( object ):
+class MockObject:
    def method( self, ival, sval, ipval ):
       self.callcount += 1
       if self.actuallyMock:

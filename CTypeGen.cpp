@@ -818,12 +818,7 @@ entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
    return richCompare( op, diff );
 }
 
-#if PY_MAJOR_VERSION >= 3
-typedef Py_hash_t hashfunc_result;
-#else
-typedef long hashfunc_result;
-#endif
-hashfunc_result
+Py_hash_t
 entry_hash( PyObject * self ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
    return hashfunc_result( ent->die.getOffset() ^ ent->die.getUnit()->offset );
@@ -1136,11 +1131,7 @@ static PyMethodDef elf_methods[] = {
 static PyMethodDef units_methods[] = { { 0, 0, 0, 0 } };
 
 static PyNumberMethods units_asnumber = {
-#if PY_MAJOR_VERSION >= 3
    .nb_bool = units_asnumber_bool
-#else
-   .nb_nonzero = units_asnumber_bool
-#endif
 };
 
 static PyMethodDef unit_methods[] = {
@@ -1183,14 +1174,8 @@ static PySequenceMethods entry_sequence = {
 };
 
 PyMODINIT_FUNC
-#if PY_MAJOR_VERSION >= 3
 PyInit_libCTypeGen( void )
-#else
-initlibCTypeGen( void )
-#endif
 {
-#if PY_MAJOR_VERSION >= 3
-
    static struct PyModuleDef ctypeGenModule = {
       PyModuleDef_HEAD_INIT,
       "libCTypeGen", /* m_name */
@@ -1205,10 +1190,6 @@ initlibCTypeGen( void )
 
    // Create our python module, and all our types.
    PyObject * module = PyModule_Create( &ctypeGenModule );
-#else
-   PyObject * module =
-      Py_InitModule3( "libCTypeGen", ctypegen_methods, "ELF helpers" );
-#endif
 
    dwarfAttrsType.tp_name = "DWARFAttrs";
    dwarfAttrsType.tp_flags = Py_TPFLAGS_DEFAULT;
@@ -1318,8 +1299,6 @@ initlibCTypeGen( void )
    PyModule_AddObject( module, "attrnames", attrnames );
    PyModule_AddObject( module, "tagnames", tagnames );
 
-#if PY_MAJOR_VERSION >= 3
    return module;
-#endif
 }
 }

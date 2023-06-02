@@ -14,7 +14,6 @@
 # CTypeGen generates boilerplate code using python's ctype package to
 # interact with C libraries. See Aid 3558, aka go/ctypegen for the gorey details.
 
-from __future__ import absolute_import, division, print_function
 import datetime
 import io
 import os.path
@@ -45,20 +44,12 @@ ELEMENT_CLASS = tags.DW_TAG_class_type
 ELEMENT_ENUM = tags.DW_TAG_enumeration_type
 ELEMENT_TYPEDEF = tags.DW_TAG_typedef
 
-TAGGED_ELEMENTS = set( [
+TAGGED_ELEMENTS = { 
    ELEMENT_STRUCT,
    ELEMENT_UNION,
    ELEMENT_CLASS,
    ELEMENT_ENUM,
-] )
-
-# python3 doesn't have basestring
-try:
-   baseString = basestring # pylint: disable=basestring-builtin
-   PY3=False
-except NameError:
-   baseString = str
-   PY3=True
+ }
 
 try:
    dict.iteritems
@@ -84,20 +75,20 @@ else:
 def asPythonId( s ):
    ''' convert an identifier from debug data into a valid DWARF id '''
    repls = {
-         u":" : u"_cn",
-         u"<" : u"_lt",
-         u">" : u"_gt",
-         u"(" : u"_lp",
-         u")" : u"_rp",
-         u"-" : u"_dash",
-         u"=" : u"_eq",
-         u"*" : u"_ptr",
-         u" " : u"_sp",
-         u"," : u"_comma",
-         u"&" : u"_amp",
-         u"[" : u"_lbrack",
-         u"]" : u"_rbrack",
-         u"'" : u"_quot",
+         ":" : "_cn",
+         "<" : "_lt",
+         ">" : "_gt",
+         "(" : "_lp",
+         ")" : "_rp",
+         "-" : "_dash",
+         "=" : "_eq",
+         "*" : "_ptr",
+         " " : "_sp",
+         "," : "_comma",
+         "&" : "_amp",
+         "[" : "_lbrack",
+         "]" : "_rbrack",
+         "'" : "_quot",
          }
    if s is None:
       return None
@@ -109,7 +100,7 @@ def asPythonId( s ):
          prevWasEscaped = True
       else:
          if prevWasEscaped:
-            output.write( u"_" )
+            output.write( "_" )
          output.write( c )
          prevWasEscaped = False
    out = output.getvalue()
@@ -121,7 +112,7 @@ def asPythonId( s ):
 def pad( indent ):
    ''' Return a padding string with the given number of spaces - useful for
    formatting'''
-   return u"".ljust( indent )
+   return "".ljust( indent )
 
 tagPrefixes = {
       tags.DW_TAG_structure_type: "struct_",
@@ -135,17 +126,17 @@ def flatName( die, withTag=True ):
    prefix, like "struct_", to disambiguate them from non-tagged types. Eg: a
    typedef and a struct can have different types, but the same name. '''
    tagPrefix = tagPrefixes.get( die.tag(), "" ) if withTag else ""
-   return "%s%s" % ( tagPrefix, "::".join( die.fullname() ) )
+   return f"{tagPrefix}{'::'.join( die.fullname() )}"
 
 def deref( die ):
    ''' Remove any CV-qualifiers and dereference any typedefs from a DIE until
    we get down to its unqualified, non-typedef'd type
    '''
-   qualifiers = set( [ tags.DW_TAG_const_type,
-                         tags.DW_TAG_volatile_type,
-                         tags.DW_TAG_typedef,
-                         tags.DW_TAG_restrict_type ]
-                         )
+   qualifiers = {  tags.DW_TAG_const_type,
+                  tags.DW_TAG_volatile_type,
+                  tags.DW_TAG_typedef,
+                  tags.DW_TAG_restrict_type 
+                }
    while die is not None and die.tag() in qualifiers:
       die = die.DW_AT_type
    return die
@@ -154,7 +145,7 @@ def isVoid( die ):
    ''' return true if a DIE represents some qualified or typedef'd "void" '''
    return deref( die ) is None
 
-class Type( object ):
+class Type:
    ''' An object representing a Dwarf Type. Mostly a wrapper around a DIE. Subclassed
    for structures, unions, functions, etc'''
 
@@ -186,9 +177,9 @@ class Type( object ):
          self.defdie = d.findDefinition( self.die )
          if self.defdie:
             return self.defdie
-      self.resolver.errorfunc( "failed to find definition for %s - "
-                               "will fall back to using declaration" %
-                               "::".join( self.die.fullname() ) )
+      self.resolver.errorfunc( "failed to find definition for "
+                               f"{'::'.join( self.die.fullname() )} - "
+                               "will fall back to using declaration" )
       self.defdie = self.die
       return self.defdie
 
@@ -197,8 +188,8 @@ class Type( object ):
 
    def dieComment( self ):
       if self.pyName() == self.name():
-         return u""
-      return u"# DIE %s" % self.name()
+         return ""
+      return f"# DIE {self.name()}"
 
    def pyName( self, withTag=True ):
       ''' Remove non-python characters from this type's name'''
@@ -243,10 +234,10 @@ class Type( object ):
 class VoidType( Type ):
    ''' A type representing void '''
    def __init__( self, resolver ):
-      super( VoidType, self ).__init__( resolver, None )
+      super().__init__( resolver, None )
 
    def name( self, withTag=True ):
-      return u"void"
+      return "void"
 
 class FunctionType( Type ):
    ''' A type representing a function as pointed to by a
@@ -270,34 +261,33 @@ class FunctionType( Type ):
       return True
 
    def size( self ):
-      raise Exception( "functions don't have sizes : %s" % self.name() )
+      raise Exception( f"functions don't have sizes : {self.name()}" )
 
    def ctype( self ):
       result = io.StringIO()
-      result.write( u"CFUNCTYPE( " )
+      result.write( "CFUNCTYPE( " )
       rtype = self.baseType()
       if rtype:
          result.write( rtype.ctype() )
       else:
-         result.write( u"None" )
+         result.write( "None" )
 
       for child in self.params():
-         result.write( u", %s\n      " %
-               self.resolver.dieToType( child.DW_AT_type ).ctype() )
-      result.write( u")" )
+         result.write(
+               f", {self.resolver.dieToType( child.DW_AT_type ).ctype()}\n      " )
+      result.write( ")" )
       return result.getvalue()
 
 class ExternalType( Type ):
    ''' Any type that appears in one of the existing import modules.
    '''
    def __init__( self, resolver, die, module ):
-      super( ExternalType, self ).__init__( resolver, die )
+      super().__init__( resolver, die )
       self.module = module
 
    def pyName( self, withTag=True ):
       ''' Prefix the pyName with the name of the imported package. '''
-      return "%s.%s" % ( self.module.__name__,
-                         super( ExternalType, self ).pyName( withTag ) )
+      return f"{self.module.__name__}.{super().pyName( withTag )}"
 
 class FunctionDefType( FunctionType ):
    ''' A type representing a function declaration. We use these DIEs to
@@ -329,34 +319,34 @@ class FunctionDefType( FunctionType ):
 
       for linkername in sorted( set( names ) ):
          if keyword.iskeyword( linkername ):
-            self.resolver.errorfunc( "cannot provide access to %s - "
-                  "its dynamic name %s is a python keyword" %
-                  ( self.name(), linkername ) )
+            self.resolver.errorfunc( f"cannot provide access to {self.name()} - "
+                  f"its dynamic name {linkername} is a python keyword" )
             continue
 
-         stream.write( u"%sif hasattr(lib, '%s'):\n" % (
+         stream.write( "{}if hasattr(lib, '{}'):\n".format(
                        pad( indent ), linkername ) )
          indent += 3
-         stream.write( u"%slib.%s.restype = %s\n" %
-              ( pad( indent ), linkername, base.ctype() if base else "None" ) )
+         stream.write( "%slib.%s.restype = %s\n" %
+                       ( pad( indent ),
+               linkername, base.ctype() if base else "None" ) )
          args = []
 
          for child in self.params():
             baseType = self.resolver.dieToType( child.DW_AT_type )
             args.append( baseType.ctype() )
 
-         stream.write( u"%slib.%s.argtypes = " % ( pad( indent ), linkername ) )
+         stream.write( f"{pad( indent )}lib.{linkername}.argtypes = " )
          if args:
-            sep = u"["
+            sep = "["
             for arg in args:
-               stream.write( u"%s\n%s%s" % ( sep, pad( indent + 3 ), arg ) )
+               stream.write( f"{sep}\n{pad( indent + 3 )}{arg}" )
                sep = ","
-            stream.write( u" ]\n\n" )
+            stream.write( " ]\n\n" )
          else:
-            stream.write( u"[]\n\n" )
+            stream.write( "[]\n\n" )
          indent -= 3
 
-class Member( object ):
+class Member:
    ''' A single member in a struct, union, class etc. '''
    def __init__( self, die, resolver ):
       self.resolver = resolver
@@ -487,7 +477,7 @@ class MemberType( Type ):
       types of the named members will be renamed as appropriate. This is useful
       for anonymous structures, etc, used within struct definitions for their
       fields. '''
-      super( MemberType, self ).__init__( resolver, die )
+      super().__init__( resolver, die )
       self.members = []
       self.anonMembers = set()
       self.alignment_ = 0
@@ -509,14 +499,14 @@ class MemberType( Type ):
             continue
          if tag == tags.DW_TAG_inheritance:
             member = Member( field, self.resolver )
-            member.setName( u"__super__%d" % self.superCount )
+            member.setName( "__super__%d" % self.superCount )
             self.superCount += 1
             self.members.append( member )
          elif tag == tags.DW_TAG_member:
             member = Member( field, self.resolver )
             if field.DW_AT_name is None:
                anon_field += 1
-               member.setName( u"__anon__member__%d" % anon_field )
+               member.setName( "__anon__member__%d" % anon_field )
                self.anonMembers.add( member )
 
             self.members.append( member )
@@ -544,7 +534,7 @@ class MemberType( Type ):
                                      ( field.name(), field.tag(), self.name() ) )
 
    def applyHints( self, spec ):
-      super( MemberType, self ).applyHints( spec )
+      super().applyHints( spec )
       self.findMembers()
       fieldHints = spec.fieldHints or []
 
@@ -595,19 +585,19 @@ class MemberType( Type ):
       ''' Declare a structure - we don't need to know the fields to
       declare it (think forward reference) '''
 
-      out.write( u'\n' )
+      out.write( '\n' )
       # TestableCtypeClass is a mixin defined in CTypeGenRun, and
       # provides methods on the # generated class to do some consistency
       # checking. The generated code will perform these tests if run as
       # a stand-alone program.
-      out.write( u'class %s( %s, TestableCtypeClass' % ( self.pyName(), self.base ) )
+      out.write( f'class {self.pyName()}( {self.base}, TestableCtypeClass' )
       for mixin in self.mixins:
          out.write( ', %s' % mixin )
-      out.write( u' ):\n' )
+      out.write( ' ):\n' )
       if self.dieComment():
-         out.write( u"   %s\n" % self.dieComment() )
-      out.write( u"   pass\n" )
-      out.write( u'\n' )
+         out.write( "   %s\n" % self.dieComment() )
+      out.write( "   pass\n" )
+      out.write( '\n' )
 
    def define( self, out ):
       ''' Define a type: we need to render the fields now, so something else
@@ -621,19 +611,19 @@ class MemberType( Type ):
       for m in self.members:
          self.resolver.defineType( m.type(), out )
 
-      out.write( u"\n" )
-      out.write( u"%s._ctypegen_native_size = %d\n" % ( self.pyName(),
+      out.write( "\n" )
+      out.write( "%s._ctypegen_native_size = %d\n" % ( self.pyName(),
                                                           self.size() ) )
-      out.write( u"%s._ctypegen_have_definition = True\n" % self.pyName() )
+      out.write( "%s._ctypegen_have_definition = True\n" % self.pyName() )
 
       # Indicate any fields we'll intentionally allow to have unaligned
       # pointers in them.
       if self.unalignedPtrs:
-         out.write( u"%s.allow_unaligned = True\n" % self.pyName() )
+         out.write( "%s.allow_unaligned = True\n" % self.pyName() )
       else:
          unaligned = [ m.pyName() for m in self.members if m.allowUnalignedPtr ]
          if unaligned:
-            out.write( u"%s.allow_unaligned = %s\n" % ( self.pyName(), unaligned ) )
+            out.write( f"{self.pyName()}.allow_unaligned = {unaligned}\n" )
 
       self.alignment_ = 1
       packComment = "explicitly requested by type hint"
@@ -642,8 +632,8 @@ class MemberType( Type ):
          # We must set _pack_ before _fields_, because due to a limitation of ctypes,
          # so accumulate fields in _fields_pre, first as we calculate what to do
          # about packing. 9quoting the 'p' below stops pylint gagging on this file.)
-         out.write( u"%s._fields_pre = [ # \x70ylint: disable=protected-access\n" %
-               self.pyName() )
+         out.write( "%s._fields_pre = [ # \x70ylint: disable=protected-access\n" %
+                    self.pyName() )
 
          # the bit offset expected for the next field in a bitfield assuming it
          # fits in the current datatype
@@ -675,7 +665,7 @@ class MemberType( Type ):
                   size = self.die.DW_AT_byte_size - ( fieldOffset or 0 )
                typstr = "c_char * %d" % size
                self.resolver.errorfunc(
-                     "padded %s:%s (no definition for %s)" % (
+                     "padded {}:{} (no definition for {})".format(
                         self.name( withTag=False ), member.name(),
                         member.type().name() ) )
             else:
@@ -719,7 +709,7 @@ class MemberType( Type ):
                      # Insert padding to consume the remainder of this field
                      padding = expected_end - expected_bit_offset
                      member.pre_pads.append( padding )
-                     out.write( u"   ( \"%s\", %s, %d ),\n" %
+                     out.write( "   ( \"%s\", %s, %d ),\n" %
                         ( "%s_prepad_%d" % ( member.pyName(), expected_end ),
                            typstr, padding ) )
                   # Move on to the next data object.
@@ -731,7 +721,7 @@ class MemberType( Type ):
                diff = off - expected_bit_offset
                if diff != 0:
                   member.pre_pads.append( diff )
-                  out.write( u"   ( \"%s\", %s, %d ),\n" %
+                  out.write( "   ( \"%s\", %s, %d ),\n" %
                      ( "%s_prepad_%d" % ( member.pyName(), expected_end ),
                         typstr, diff ) )
 
@@ -739,11 +729,11 @@ class MemberType( Type ):
                # this one
                expected_bit_offset = off + fieldDie.DW_AT_bit_size
 
-               out.write( u"   ( \"%s\", %s, %d ),\n" %
-                     ( member.pyName(), typstr, member.bit_size() ) )
+               out.write( "   ( \"%s\", %s, %d ),\n" %
+                          ( member.pyName(), typstr, member.bit_size() ) )
             else:
                # Regular, non-bitfield member.
-               out.write( u"   ( \"%s\", %s ),\n" % ( member.name(), typstr ) )
+               out.write( f"   ( \"{member.name()}\", {typstr} ),\n" )
                byteoff = fieldDie.DW_AT_data_member_location or 0
                if self.definition().tag() != tags.DW_TAG_union_type:
                   # Full data object - if the next object is a bitfield, it'll
@@ -776,10 +766,10 @@ class MemberType( Type ):
          if self.definition().tag() != tags.DW_TAG_union_type and \
                expected_end < actual_size and \
                len( self.members ) != self.superCount:
-            out.write( u"   ( \"__trailing_pad\", (c_char * %d)),\n" % (
+            out.write( "   ( \"__trailing_pad\", (c_char * %d)),\n" % (
                actual_size - expected_end ) )
 
-         out.write( u"]\n" )
+         out.write( "]\n" )
 
          # If the size of the entire object is not a multiple of the alignment
          # we calculated the type must be packed.
@@ -792,21 +782,21 @@ class MemberType( Type ):
          # If this type is packed, then let ctypes know, and set its alignment
          # to 1, because packed types don't need to be aligned in structures.
          if self.packed:
-            out.write( u"%s._pack_ = 1 # %s\n" % ( self.pyName(), packComment ) )
+            out.write( f"{self.pyName()}._pack_ = 1 # {packComment}\n" )
             self.alignment_ = 1
 
          if self.anonMembers:
-            out.write( u"%s._anonymous_ = (\n" % self.pyName() )
+            out.write( "%s._anonymous_ = (\n" % self.pyName() )
             for fieldDie in sorted( self.anonMembers ):
-               out.write( u"   \"%s\",\n" % fieldDie.pyName() )
-            out.write( u"   )\n" )
+               out.write( "   \"%s\",\n" % fieldDie.pyName() )
+            out.write( "   )\n" )
 
          # Now that we've worked out what to do with the "pack" field, we can
          # finally assign to the type's _fields_
-         out.write( u"%s._fields_ = %s._fields_pre\n" %
-               ( self.pyName(), self.pyName() ) )
+         out.write( "%s._fields_ = %s._fields_pre\n" %
+                    ( self.pyName(), self.pyName() ) )
 
-      out.write( u"\n" )
+      out.write( "\n" )
       return True
 
 class StructType( MemberType ):
@@ -815,13 +805,13 @@ class StructType( MemberType ):
    __slots__ = []
 
    def ctype_subclass( self ):
-      return u"Structure"
+      return "Structure"
 
    def define( self, out ):
-      if not super( StructType, self ).define( out ):
+      if not super().define( out ):
          return False
-      out.write( u"%s._ctypegen_offsets = [ " % self.pyName() )
-      sep = u""
+      out.write( f"{self.pyName()}._ctypegen_offsets = [ "  )
+      sep = ""
 
       memberCount = 0
       lastOffset = -1
@@ -843,14 +833,14 @@ class StructType( MemberType ):
             # if we're adding our own padding in front of this member (for anon
             # bitfields), include the padding in the offsets table as "-1". We
             # don't expect anything to access it anyway.
-            out.write( u"%s%s" % ( sep, -1 ) )
-            sep = u", " if memberCount % 10 != 0 else u",\n    "
+            out.write( f"{sep}{-1}" )
+            sep = ", " if memberCount % 10 != 0 else ",\n    "
             memberCount += 1
 
-         out.write( u"%s%s" % ( sep, offset ) )
+         out.write( f"{sep}{offset}" )
          memberCount += 1
-         sep = u", " if memberCount % 10 != 0 else u",\n    "
-      out.write( u" ]\n\n" )
+         sep = ", " if memberCount % 10 != 0 else ",\n    "
+      out.write( " ]\n\n" )
       return True
 
 class UnionType( MemberType ):
@@ -858,21 +848,21 @@ class UnionType( MemberType ):
    __slots__ = []
 
    def ctype_subclass( self ):
-      return u"Union"
+      return "Union"
 
    def define( self, out ):
-      if not super( UnionType, self ).define( out ):
+      if not super().define( out ):
          return False
       if not self.members and self.die.DW_AT_byte_size is not None:
-         out.write( u"%s._fields_ = [('__broken_transparent_union', c_void_p)]\n"
-                 % self.pyName() )
+         out.write( f"{self.pyName()}._fields_ = [('__broken_transparent_union', "
+                    "c_void_p)]\n" )
       return True
 
 class EnumType( Type ):
    __slots__ = [ "nameless" ]
 
    def __init__( self, resolver, die  ):
-      super( EnumType, self ).__init__( resolver, die )
+      super().__init__( resolver, die )
       self.nameless = self.resolver.namelessEnums
 
    def applyHints( self, spec ):
@@ -885,29 +875,29 @@ class EnumType( Type ):
          self.resolver.defineType( rtype, out )
       indent = ''
 
-      out.write( u"class %s( %s ):\n" % ( self.pyName(), self.intType() ) )
-      out.write( u'%s_ctypegen_have_definition = True\n' % pad( 3 ) )
+      out.write( f"class {self.pyName()}( {self.intType()} ):\n" )
+      out.write( f'{pad( 3 )}_ctypegen_have_definition = True\n' )
       if not self.nameless:
          indent = pad( 3 )
       else:
-         out.write( u'# Values of %s (nameless enum)\n' % self.pyName() )
+         out.write( f'# Values of {self.pyName()} (nameless enum)\n' )
 
       childcount = 0
       for child in self.definition():
          if self.dieComment():
-            out.write( u"%s%s\n" % ( indent, self.dieComment() ) )
+            out.write( f"{indent}{self.dieComment()}\n" )
          if child.tag() == tags.DW_TAG_enumerator:
             childcount += 1
             value = child.DW_AT_const_value
             name = asPythonId( child.DW_AT_name )
-            out.write( u"%s%s = %s(%d).value # %s\n" % (
-               indent, name, self.intType(), value, hex( value ) ) )
+            out.write( f"{indent}{name} = {self.intType()}({value}).value # "
+                       f"{hex(value)}\n" )
             if self.nameless:
                self.resolver.defined.add( name )
       if childcount == 0:
-         out.write( u"%spass\n" % indent )
+         out.write( f"{indent}pass\n" )
 
-      out.write( u"\n\n" )
+      out.write( "\n\n" )
       return True
 
    def intType( self ):
@@ -929,51 +919,51 @@ class PrimitiveType( Type ):
 
 
    baseTypes = {
-         u"long long unsigned int" : ( u"c_ulonglong", _align(4, 8) ),
-         u"unsigned long long" : ( u"c_ulonglong", _align(4, 8) ),
-         u"long long int" : ( u"c_longlong", _align(4, 8) ),
-         u"long long" : ( u"c_longlong", _align(4, 8) ),
-         u"long unsigned int" : ( u"c_ulong", _align(4, 8) ),
-         u"unsigned long" : ( u"c_ulong", _align( 4, 8 ) ),
-         u"sizetype" : ( u"c_ulong", _align( 4, 8 ) ),
-         u"short unsigned int" : ( u"c_ushort", _align( 2, 2 ) ),
-         u"unsigned short" : ( u"c_ushort", _align( 2, 2 ) ),
-         u"unsigned int" : ( u"c_uint", _align( 4, 4 ) ),
-         u"unsigned char" : ( u"c_ubyte", _align( 1, 1 ) ),
-         u"char16_t" : ( u"c_short", _align( 2, 2 ) ),
-         u"signed char" : ( u"c_byte", _align( 1, 1 ) ),
-         u"char" : ( u"c_char", _align( 1, 1 ) ),
-         u"long int" : ( u"c_long", _align( 4, 8 ) ),
-         u"long" : ( u"c_long", _align( 4, 8 ) ),
-         u"int" : ( u"c_int", _align( 4, 4 ) ),
-         u"short int" : ( u"c_short", _align( 2, 2 ) ),
-         u"short" : ( u"c_short", _align( 2, 2 ) ),
-         u"__ARRAY_SIZE_TYPE__": ( u"c_ulong", _align( 4, 8 ) ),
-         u"float" : ( u"c_float", _align( 4, 4 ) ),
-         u"_Bool" : ( u"c_bool", _align( 1, 1 ) ),
-         u"bool" : ( u"c_bool", _align( 1, 1 ) ),
-         u"double" : ( u"c_double", _align( 4, 8 ) ),
-         u"long double" : ( u"c_longdouble", _align( 4, 16 ) ),
+         "long long unsigned int" : ( "c_ulonglong", _align(4, 8) ),
+         "unsigned long long" : ( "c_ulonglong", _align(4, 8) ),
+         "long long int" : ( "c_longlong", _align(4, 8) ),
+         "long long" : ( "c_longlong", _align(4, 8) ),
+         "long unsigned int" : ( "c_ulong", _align(4, 8) ),
+         "unsigned long" : ( "c_ulong", _align( 4, 8 ) ),
+         "sizetype" : ( "c_ulong", _align( 4, 8 ) ),
+         "short unsigned int" : ( "c_ushort", _align( 2, 2 ) ),
+         "unsigned short" : ( "c_ushort", _align( 2, 2 ) ),
+         "unsigned int" : ( "c_uint", _align( 4, 4 ) ),
+         "unsigned char" : ( "c_ubyte", _align( 1, 1 ) ),
+         "char16_t" : ( "c_short", _align( 2, 2 ) ),
+         "signed char" : ( "c_byte", _align( 1, 1 ) ),
+         "char" : ( "c_char", _align( 1, 1 ) ),
+         "long int" : ( "c_long", _align( 4, 8 ) ),
+         "long" : ( "c_long", _align( 4, 8 ) ),
+         "int" : ( "c_int", _align( 4, 4 ) ),
+         "short int" : ( "c_short", _align( 2, 2 ) ),
+         "short" : ( "c_short", _align( 2, 2 ) ),
+         "__ARRAY_SIZE_TYPE__": ( "c_ulong", _align( 4, 8 ) ),
+         "float" : ( "c_float", _align( 4, 4 ) ),
+         "_Bool" : ( "c_bool", _align( 1, 1 ) ),
+         "bool" : ( "c_bool", _align( 1, 1 ) ),
+         "double" : ( "c_double", _align( 4, 8 ) ),
+         "long double" : ( "c_longdouble", _align( 4, 16 ) ),
          # ctypes has no type for 128 bit floats - do our best.
          # There are no 128-bit ints on 32-bit
-         u"_Float128" : ( u"c_longdouble", _align( 16, 16 ) ),
-         u"__float128" : ( u"c_longdouble", _align( 16, 16 ) ),
-         u"__int128" : ( u"(c_longlong * 2)", _align( None, 16 ) ),
-         u"__int128 unsigned" : ( u"(c_ulonglong * 2)", _align( None, 16 ) ),
-         u"wchar_t" : ( u"c_wchar", _align( 4, 4 ) ),
-         u"char32_t" : ( u"c_int", _align( 4, 4 ) ),
+         "_Float128" : ( "c_longdouble", _align( 16, 16 ) ),
+         "__float128" : ( "c_longdouble", _align( 16, 16 ) ),
+         "__int128" : ( "(c_longlong * 2)", _align( None, 16 ) ),
+         "__int128 unsigned" : ( "(c_ulonglong * 2)", _align( None, 16 ) ),
+         "wchar_t" : ( "c_wchar", _align( 4, 4 ) ),
+         "char32_t" : ( "c_int", _align( 4, 4 ) ),
    }
 
    def alignment( self ):
       name = self.die.DW_AT_name
       if not name in PrimitiveType.baseTypes:
-         raise Exception( "no python ctype for primitive C type %s" % name )
+         raise Exception( f"no python ctype for primitive C type {name}" )
       align = PrimitiveType.baseTypes[ name ][ 1 ]
       if align is None:
          if die.DW_AT_encoding == 0x3: # Complex float.
              return die.DW_AT_byte_size / 2
-         raise Exception( "no python ctype for primitive C type %s " 
-                          "on this architecture" % name )
+         raise Exception( f"no python ctype for primitive C type {name} "
+                          "on this architecture" )
       return align
 
    def name( self, withTag=True ):
@@ -996,7 +986,7 @@ class PrimitiveType( Type ):
 
 def getArrayDimensions( die ):
    dimensions = []
-   for child in reversed( [ c for c in die ] ):
+   for child in reversed( list( die ) ):
       if child.tag() == tags.DW_TAG_subrange_type:
          if child.DW_AT_count is not None:
             dimensions.append( child.DW_AT_count )
@@ -1012,7 +1002,7 @@ class ArrayType( Type ):
 
    def __init__( self, resolver, die ):
       ''' Find all the array's dimensions so we can calculate size, and ctype '''
-      super( ArrayType, self ).__init__( resolver, die )
+      super().__init__( resolver, die )
       self.dimensions = getArrayDimensions( self.definition() )
 
    def define( self, out ):
@@ -1021,7 +1011,7 @@ class ArrayType( Type ):
    def ctype( self ):
       text = self.baseType().ctype()
       for d in self.dimensions:
-         text = u"%s * %d" % ( text, d )
+         text = f"{text} * {d}"
       return text
 
    def size( self ):
@@ -1058,15 +1048,15 @@ class PointerType( Type ):
 
    def ctype( self ):
       if self.isVoidp():
-         return u"c_void_p"
+         return "c_void_p"
       baseDie = self.definition().DW_AT_type
       baseCtype = self.baseType().ctype()
       if baseDie.tag() == tags.DW_TAG_subroutine_type:
          return baseCtype
-      if baseCtype == u"c_char" or baseCtype == u'CONST( c_char )':
+      if baseCtype in ( "c_char", 'CONST( c_char )' ):
          # XXX: need to be able to tune this
-         return u"c_char_p"
-      return u"POINTER( %s )" % baseCtype
+         return "c_char_p"
+      return f"POINTER( {baseCtype} )"
 
 class Typedef( Type ):
    ''' Typedefs are basic types that alias others. When delcaring/defining, we just
@@ -1075,11 +1065,11 @@ class Typedef( Type ):
    __slots__ = []
 
    def __init__( self, resolver, die ):
-      super( Typedef, self ).__init__( resolver, die )
+      super().__init__( resolver, die )
       self.baseType()
 
    def applyHints( self, spec ):
-      super( Typedef, self ).applyHints( spec )
+      super().applyHints( spec )
       # a typedef with no base type is a "c_void", so we can't apply hints
       if self.baseType() is not None:
          self.baseType().applyHints( spec )
@@ -1102,11 +1092,10 @@ class Typedef( Type ):
       if name == ctype:
          return
       if len( name ) + len( ctype ) > 80:
-         sep = u' \\\n   '
+         sep = ' \\\n   '
       else:
-         sep = u' '
-      out.write( u'%s = %s%s%s # typedef\n' %
-                 ( name, sep, ctype, self.dieComment() ) )
+         sep = ' '
+      out.write( f'{name} = {sep}{ctype}{self.dieComment()} # typedef\n' )
 
    def size( self ):
       return self.baseType().size()
@@ -1135,20 +1124,20 @@ class ConstType( ModifierType ):
 
    def ctype( self ):
       base = self.baseType()
-      name = base.ctype() if base is not None else u"c_void_p"
-      return u"CONST( %s )" % name
+      name = base.ctype() if base is not None else "c_void_p"
+      return f"CONST( {name} )"
 
 class VolatileType( ModifierType ):
    __slots__ = []
 
    def ctype( self ):
-      return u"VOLATILE( %s )" % self.baseType().ctype()
+      return f"VOLATILE( {self.baseType().ctype()} )"
 
 class RestrictType( ModifierType ):
    __slots__ = []
 
    def ctype( self ):
-      return u"RESTRICT( %s )" % self.baseType().ctype()
+      return f"RESTRICT( {self.baseType().ctype()} )" 
 
 typeFromTag = {
       tags.DW_TAG_typedef : Typedef,
@@ -1170,7 +1159,7 @@ typeFromTag = {
       tags.DW_TAG_ptr_to_member_type : PointerType,
 }
 
-class TypeResolver( object ):
+class TypeResolver:
 
    ''' Construct a python file with a set of Ctypes derived from a
    DWARF-annotated binary '''
@@ -1256,7 +1245,7 @@ class TypeResolver( object ):
          wildcardNamespace = True
       elif globalVars:
          globalVars = [
-               ( n if isinstance( n, tuple ) else tuple( ( n.split( "::" ) ) ) )
+               ( n if isinstance( n, tuple ) else tuple(  n.split( "::" )  ) )
                   for n in globalVars ]
 
          self.globalsFilter = lambda die: die.fullname() in globalVars
@@ -1272,7 +1261,7 @@ class TypeResolver( object ):
          wildcardNamespace = True
       elif functions:
          functions = [ ( n if isinstance( n, tuple ) else
-            tuple( ( n.split( "::" ) ) ) ) for n in functions ]
+            tuple(  n.split( "::" )  ) ) for n in functions ]
          self.functionsFilter = lambda die: die.fullname() in functions
          for n in functions:
             self.functions[ n ] = None
@@ -1304,7 +1293,7 @@ class TypeResolver( object ):
                if hint.elements is None or tag in hint.elements:
                   self.applyHintToType( hint, typ )
          else:
-            self.errorfunc( "no type found for %s" % hint.cName )
+            self.errorfunc( f"no type found for {hint.cName}" )
 
       # Iterate over all hints that need to be applied
       # For things like anonymous structures where the hint provides a nested
@@ -1396,7 +1385,7 @@ class TypeResolver( object ):
       if typ.resolver != self: # This type came from a different module - use as is
          return True
       if isVoid( typ.definition() ):
-         self.errorfunc( "%s is 'void' - cannot output definition" % typ.name() )
+         self.errorfunc( f"{typ.name()} is 'void' - cannot output definition" )
          return True
 
       typ.defined = typ.define( out )
@@ -1410,7 +1399,7 @@ class TypeResolver( object ):
       '''
 
       tag = die.tag()
-      if tag == tags.DW_TAG_compile_unit or tag == tags.DW_TAG_partial_unit:
+      if tag in ( tags.DW_TAG_compile_unit, tags.DW_TAG_partial_unit ):
          # Just decend compile units without affecting any namespace scope
          producer = die.DW_AT_producer
          if producer is not None:
@@ -1468,7 +1457,7 @@ class TypeResolver( object ):
    def write( self, stream ):
       ''' Actually write the python file to a stream '''
       stream.write(
-u'''from ctypes import * # pylint: disable=wildcard-import
+'''from ctypes import * # pylint: disable=wildcard-import
 from CTypeGenRun import * # pylint: disable=wildcard-import
 # pylint: disable=unnecessary-pass,protected-access
 
@@ -1476,8 +1465,8 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
 ''' )
 
       for pkg in self.existingTypes:
-         stream.write( u"import %s\n" % pkg.__name__ )
-      stream.write( u"\n" )
+         stream.write( "import %s\n" % pkg.__name__ )
+      stream.write( "\n" )
 
       # Define any types needed by variables or functions, as they may
       # contribute to self.types.
@@ -1510,7 +1499,7 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       # this module.
       for typ, hint in sorted( self.allHintedTypes.items() ):
          if hint.pythonName != typ.ctype():
-            stream.write( u'%s = %s # python hint differs from ctype\n' % (
+            stream.write( '{} = {} # python hint differs from ctype\n'.format(
                           hint.pythonName, typ.ctype() ) )
 
       # If tagged types don't conflict with untagged, we can make aliases without
@@ -1520,13 +1509,13 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
             for tag, typ in byTag.items():
                if not isinstance( typ, ExternalType ) and \
                         typ.defined and tag in TAGGED_ELEMENTS:
-                  stream.write( "%s = %s # unambiguous name for tagged type\n" % (
-                              typ.pyName( False ), typ.pyName( True ) ) )
+                  stream.write( f"{typ.pyName( False )} = {typ.pyName( True )} "
+                                "# unambiguous name for tagged type\n" )
 
       # Now write out a class definition containing an entry for each global
       # variable.
-      stream.write( u"class Globals(object):\n" )
-      stream.write( u"%sdef __init__(self, dll):\n" % pad( 3 ) )
+      stream.write( "class Globals(object):\n" )
+      stream.write( "%sdef __init__(self, dll):\n" % pad( 3 ) )
 
       for _, die in sorted( self.variables.items() ):
          if die is None:
@@ -1538,14 +1527,14 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
             cname = die.DW_AT_name
          pyName = asPythonId( "::".join( die.fullname() ) )
 
-         stream.write( u"%sself.%s = ( %s ).in_dll( dll, '%s' )\n" %
-               ( pad( 6 ), pyName, t.ctype(), cname ) )
+         stream.write( "%sself.%s = ( %s ).in_dll( dll, '%s' )\n" %
+                       ( pad( 6 ), pyName, t.ctype(), cname ) )
 
-      stream.write( u"%spass" % pad( 6 ) )
+      stream.write( "%spass" % pad( 6 ) )
 
       ctypesProtos = {}
 
-      stream.write( u'\ndef decorateFunctions( lib ):\n' )
+      stream.write( '\ndef decorateFunctions( lib ):\n' )
 
       for _, die in sorted( self.functions.items() ):
          if not die:
@@ -1554,17 +1543,17 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
          t.writeLibUpdates( 3, stream )
          ctypesProtos[ t.pyName() ] = t.ctype()
 
-      stream.write( u'   pass\n' )
+      stream.write( '   pass\n' )
 
       if ctypesProtos:
-         stream.write( u"\nfunctionTypes = {\n" )
+         stream.write( "\nfunctionTypes = {\n" )
          for funcName, proto in ctypesProtos.items():
-            stream.write( u"   '%s': %s,\n" % ( funcName, proto ) )
-         stream.write( u"}" )
+            stream.write( f"   '{funcName}': {proto},\n" )
+         stream.write( "}" )
 
-      stream.write( u'\n\n' )
+      stream.write( '\n\n' )
 
-class Hint( object ):
+class Hint:
    ''' Hints indicate some modification to a field in a struct/union
    We can currently:
    o override the name of the field
@@ -1581,7 +1570,7 @@ class Hint( object ):
       self.typeOverride = typeOverride
       self.allowUnaligned = allowUnaligned
 
-class PythonType( object ):
+class PythonType:
    ''' Hints for a type the user wants rendered '''
 
    __slots__ = [
@@ -1601,9 +1590,6 @@ class PythonType( object ):
 
    def __init__( self, pythonName, cName=None, base=None, pack=False,
            mixins=None, nameless_enum=None, elements=None, unalignedPtrs=False ):
-      if not PY3 and isinstance( pythonName, str ):
-         # This is py2 compat code, so pylint: disable=unicode-builtin
-         pythonName = unicode( pythonName, 'utf-8' )
       self.pythonName = asPythonId( pythonName )
       self.cName = cName if cName is not None else pythonName
       self.fieldHints = {}
@@ -1643,10 +1629,10 @@ def getlib( libname ):
 
 def getDwarves( libnames ):
    # Allow libnames to be a single string, or list thereof.
-   if isinstance( libnames, baseString ):
+   if isinstance( libnames, str ):
       libnames = [ libnames ]
    if not isinstance( libnames, list ) or not isinstance(
-         libnames[ 0 ], baseString ):
+         libnames[ 0 ], str ):
       return None
    return [ getlib( libname ) for libname in libnames ]
 
@@ -1713,7 +1699,7 @@ def generateAll( libs, outname, modname=None, macroFiles=None, trailer=None,
          existingTypes=existingTypes,
          namespaceFilter=namespaceFilter )
 
-class MacroCallback( object ):
+class MacroCallback:
    def __init__( self, output, interested, resolver ):
       self.filescope = []
       self.interested = interested if callable( interested ) \
@@ -1739,13 +1725,13 @@ class MacroCallback( object ):
             return
          if isinstance( args, ast.Name ):
             macroArgs = [ args.id ]
-         elif PY3 and isinstance( args,
-               ast.Constant ): # pylint: disable=no-member
+         elif isinstance( args,
+               ast.Constant ):
             macroArgs = [ args.value ]
          else:
             macroArgs = [
                elt.value
-               if PY3 and isinstance( elt, ast.Constant ) # pylint: disable=no-member
+               if isinstance( elt, ast.Constant )
                else elt.id for elt in args.elts ]
          name = data[ 0:openParen ]
          value = data[ closeParen + 1: ]
@@ -1787,12 +1773,12 @@ class MacroCallback( object ):
       # the AST so wrap macros in try/catch
       self.output.write("try:\n")
       if macroArgs is not None:
-         self.output.write( "   def %s%s: return %s" % ( name, argStr, value ) )
+         self.output.write( f"   def {name}{argStr}: return {value}" )
       else:
-         self.output.write( "   %s = %s" % ( name, value ) )
-      self.output.write( " # %s:%d\n" % ( self.filescope[ -1 ][ 1 ], line ) )
+         self.output.write( f"   {name} = {value}" )
+      self.output.write( f" # {self.filescope[ -1 ][ 1 ]}:{line}\n" )
       self.output.write( "except:\n" )
-      self.output.write( "   __ctypegen_failed_macros.append('%s')\n" % name )
+      self.output.write( f"   __ctypegen_failed_macros.append('{name}')\n" )
 
 
    def undef( self, line, data ):
@@ -1861,8 +1847,8 @@ def decoratedLib( idx = 0 ):
       content.write( "}\n" )
 
       # Make the whole shebang test itself when run.
-      content.write( u'\nif __name__ == "__main__":\n' )
-      content.write( u'   test_classes( __ctypegen_failed_macros )\n' )
+      content.write( '\nif __name__ == "__main__":\n' )
+      content.write( '   test_classes( __ctypegen_failed_macros )\n' )
 
       if trailer is not None:
          content.write( trailer )

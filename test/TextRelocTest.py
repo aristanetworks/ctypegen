@@ -23,7 +23,6 @@ test/textRelocs.c.  After verifying the text relocations are present, we mock
 doubleIt here and ensure the result is not doubled, but halved, as per our mock
 function
 '''
-from __future__ import absolute_import, division, print_function
 import CMock
 import subprocess
 from ctypes import CDLL, c_int
@@ -32,10 +31,9 @@ import sys
 LIBRARY = TextRelocs if len(sys.argv) <= 1 else sys.argv[1]
 
 nonPicLib = CDLL( LIBRARY )
-proc = subprocess.Popen( ("readelf -W --dynamic ./%s" % LIBRARY).split( " " ),
-      stdout=subprocess.PIPE, universal_newlines=True )
-
-out, err = proc.communicate()
+with subprocess.Popen( ("readelf -W --dynamic ./%s" % LIBRARY).split( " " ),
+      stdout=subprocess.PIPE, universal_newlines=True ) as proc:
+   out, err = proc.communicate()
 assert "(TEXTREL)" in out # make sure we actually have a text relocation
 print("have textrel in %s" % LIBRARY)
 

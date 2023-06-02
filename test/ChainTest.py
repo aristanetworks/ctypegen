@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2019 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +19,6 @@ same args passed to callme, and return the result.
 The "real" mockme returns the first arg passed to it.
 '''
 
-from __future__ import absolute_import, division, print_function
 import CTypeGen
 import CMock
 import ctypes

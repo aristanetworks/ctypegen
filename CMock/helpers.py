@@ -12,13 +12,12 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-from __future__ import absolute_import, division, print_function
 from contextlib import contextmanager
 import ctypes
 import ctypes.util
 import CMock
 
-class CountedFunc( object ):
+class CountedFunc:
    ''' Simple functor that counts number of times its invoked. This can be used
    woth PRE mocks to count the number of times a function is called.'''
    def __init__( self ):
@@ -50,7 +49,7 @@ class FakeSyscall( CMock.mocked ):
    configured value, and return the returncode with errno set as requested. '''
 
    def __init__( self, func, mockfunc, start=0, count=10000 ):
-      super( FakeSyscall, self ).__init__( func, self )
+      super().__init__( func, self )
       self.calls = 0
       self.start = start
       self.count = count
@@ -71,12 +70,12 @@ class FakeFdSyscall( FakeSyscall ):
    as per FakeSyscall
    '''
    def __init__( self, func, mockfunc, onFd, **kargs ):
-      super( FakeFdSyscall, self ).__init__( func, mockfunc, **kargs )
+      super().__init__( func, mockfunc, **kargs )
       self.onFd = onFd
 
    def __call__( self, fd, *args ):
       if self.onFd == fd or self.onFd is None:
-         return super( FakeFdSyscall, self ).__call__( fd, *args )
+         return super().__call__( fd, *args )
       return self.realfunc( fd, *args )
 
 def _decorateSyscalls( libc ):

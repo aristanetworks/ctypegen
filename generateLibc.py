@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # Copyright 2020 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +20,6 @@ system calls etc are not actually used within libc, so their definitions are
 missing. The helper library uses them, so we can find their definitions in
 there. '''
 
-from __future__ import absolute_import, division, print_function
 from CTypeGen import generate, PythonType
 import sys
 import platform
@@ -73,12 +72,12 @@ else:
    platformBroken = []
 
 # Types that need to be packed on this platform.
-packed = set( [ (n, ) for n in [
-   ] + platformPacked ] )
+packed = {  ( n, ) for n in [
+   ] + platformPacked  }
 
 # Broken types on this platform. The additional types here are broken on any
 # platforms we've seen
-broken = set( [ (n, ) for n in [
+broken = {  ( n, ) for n in [
       "cached_data",
       "hashentry",
       "in6addrinfo",
@@ -88,7 +87,7 @@ broken = set( [ (n, ) for n in [
       "printf_info",
       "printf_spec",
       "raise", # python keyword.
-       ] + platformBroken ] )
+       ] + platformBroken  }
 
 def haveDyn( die ):
    ''' Filter for functions that are in the .dynsym section - we can't call

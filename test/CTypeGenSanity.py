@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2017 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,7 +12,6 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-from __future__ import absolute_import, division, print_function
 from ctypes import c_char, CDLL, c_void_p, c_long, c_int, cast, sizeof
 from ctypes import POINTER, c_char_p, c_ulong, Structure, Union
 import sys
@@ -25,16 +24,16 @@ else:
    sanitylib = "./libCTypeSanity.so"
 
 types = [
-      PythonType( u"Foo" )
-         .field( u"anEnum", typename=u"TheEnum" )
-         .field( u"anonymousStructField", typename=u"AnonymousStructType" )
-         .field( u"anArrayField", typename=u"ArrayFieldType" ),
+      PythonType( "Foo" )
+         .field( "anEnum", typename="TheEnum" )
+         .field( "anonymousStructField", typename="AnonymousStructType" )
+         .field( "anArrayField", typename="ArrayFieldType" ),
       PythonType( "NoSuchType" ), # make sure we get a warning for notype.
-      PythonType( u"BigNum" ),
-      PythonType( u"AnonEnumWithTypedef" ),
-      PythonType( u"NamespacedLeaf", "Outer::Inner::Leaf" ),
-      PythonType( u"GlobalLeaf", "Leaf" ),
-      PythonType( u"NameSharedWithStructAndTypedef" ),
+      PythonType( "BigNum" ),
+      PythonType( "AnonEnumWithTypedef" ),
+      PythonType( "NamespacedLeaf", "Outer::Inner::Leaf" ),
+      PythonType( "GlobalLeaf", "Leaf" ),
+      PythonType( "NameSharedWithStructAndTypedef" ),
 ]
 
 functions = [
@@ -117,7 +116,7 @@ def compareObjects( indent, asMap, asCtypes ):
       cval = asCtypes.__getattribute__( k )
       if hasattr( cval, "value" ):
          cval = cval.value
-      print ( "%scompare %s: %s/%s" % ( ' ' * indent, k, v, cval ) )
+      print ( "{}compare {}: {}/{}".format( ' ' * indent, k, v, cval ) )
       if isinstance( v, dict ):
          compareObjects( indent + 4, v, cval )
       elif isinstance( v, float ):

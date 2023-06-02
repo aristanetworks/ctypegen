@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2018 Arista Networks.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,15 +13,14 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-from __future__ import absolute_import, division, print_function
 from distutils.core import setup
 from distutils.extension import Extension
 from distutils import unixccompiler
 import os
 import subprocess
 
-pipe = subprocess.Popen( [ "uname", "-m" ], stdout=subprocess.PIPE )
-( out, err ) = pipe.communicate()
+with subprocess.Popen( [ "uname", "-m" ], stdout=subprocess.PIPE ) as pipe:
+   ( out, err ) = pipe.communicate()
 arch = str( out.decode( "utf-8" ) ).strip()
 if arch == "i686":
    arch = "i386"
