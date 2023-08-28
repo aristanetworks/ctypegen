@@ -28,7 +28,7 @@ import subprocess
 from ctypes import CDLL, c_int
 import sys
 
-LIBRARY = TextRelocs if len(sys.argv) <= 1 else sys.argv[1]
+LIBRARY = "TextRelocs" if len(sys.argv) <= 1 else sys.argv[1]
 
 nonPicLib = CDLL( LIBRARY )
 with subprocess.Popen( ("readelf -W --dynamic ./%s" % LIBRARY).split( " " ),
