@@ -38,7 +38,6 @@ if platform.machine() == "aarch64": # A4NOCHECK want CPU arch, not size.
          "fpregset_t",
          "mcontext_t",
          "prfpregset_t",
-         "pthread",
          "sigcontext",
          "struct_user_fpsimd_struct",
          "ucontext_t",
@@ -55,13 +54,18 @@ elif platform.machine() == "x86_64": # A4NOCHECK, want CPU arch, not size.
          "__dirstream",
          "epoll_data",
          "helper_file",
-         "pthread",
          "stackblock",
          ]
 
 elif platform.machine() in ( "i386", "i686" ): # A4NOCHECK, want CPU arch, not size
    platformPacked = []
-   platformBroken = []
+   platformBroken = [
+         "__timex64",
+         "scratch_buffer",
+         "char_buffer",
+         "max_align_t",
+         "printf_arg",
+         ]
 
 else:
    # may need to be filled in for new archs.
@@ -86,6 +90,7 @@ broken = {  ( n, ) for n in [
       "raise", # python keyword.
       "link_map",
       "rtld_global", # embeds link_map
+      "pthread",
        ] + platformBroken }
 
 def haveDyn( die ):
