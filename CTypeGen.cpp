@@ -56,6 +56,8 @@ static PyObject * attrnames; // attribute name -> value mapping
 static PyObject * attrvalues; // attribute value -> name mapping
 static PyObject * tagnames;
 
+using namespace pstack;
+
 // These are the DWARF tags for DIEs that introduce a new namespace in C/C++
 static std::set< Dwarf::Tag > namespacetags = {
    Dwarf::DW_TAG_structure_type,
