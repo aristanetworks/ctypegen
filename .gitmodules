@@ -1,15 +1,3 @@
-[submodule "doc/cppdug-slides/reveal.js"]
-	path = docs/cppdug-slides/reveal.js
-	url = https://github.com/hakimel/reveal.js
-[submodule "doc/cppdug-slides/external"]
-	path = docs/cppdug-slides/external
-	url = https://github.com/calevans/external
-[submodule "docs/reveal.js"]
-	path = docs/reveal.js
-	url = https://github.com/hakimel/reveal.js
-[submodule "docs/external"]
-	path = docs/external
-	url = https://github.com/calevans/external
 [submodule "pstack"]
 	path = pstack
 	url = https://github.com/peadar/pstack
