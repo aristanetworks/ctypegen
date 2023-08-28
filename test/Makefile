@@ -89,4 +89,4 @@ check: check-textRelocs
 endif
 
 clean:
-	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py
+	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py *.so
