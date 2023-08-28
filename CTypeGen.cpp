@@ -48,6 +48,7 @@ static PyTypeObject unitsIteratorType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyTypeObject dwarfEntryType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyTypeObject dwarfEntryIteratorType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyTypeObject dwarfTagsType = { PyObject_HEAD_INIT( 0 ) 0 };
+static PyTypeObject dwarfBaseTypeEncodingsType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyTypeObject dwarfAttrsType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyTypeObject unitType = { PyObject_HEAD_INIT( 0 ) 0 };
 
@@ -150,6 +151,14 @@ typedef struct {
 #include <libpstack/dwarf/tags.h>
 #undef DWARF_TAG
 } PyDwarfTagsObject;
+
+typedef struct {
+   PyObject_HEAD
+#define DWARF_ATE( name, value ) int name;
+#include <libpstack/dwarf/encodings.h>
+#undef DWARF_ATE
+} PyDwarfBaseTypeEncodingsObject;
+
 // clang-format on
 
 struct PyMemberDef attr_members[] = {
@@ -173,6 +182,18 @@ struct PyMemberDef tag_members[] = {
      ( char * )#name },
 #include <libpstack/dwarf/tags.h>
 #undef DWARF_TAG
+   { NULL }
+};
+
+struct PyMemberDef ate_members[] = {
+#define DWARF_ATE( name, value )                                                    \
+   { ( char * )#name,                                                               \
+     T_INT,                                                                         \
+     offsetof( PyDwarfBaseTypeEncodingsObject, name ),                              \
+     0,                                                                             \
+     ( char * )#name },
+#include <libpstack/dwarf/encodings.h>
+#undef DWARF_ATE
    { NULL }
 };
 }
@@ -405,6 +426,15 @@ tags_init( PyObject * object, PyObject * args, PyObject * kwds ) {
 #define DWARF_TAG( name, value ) tags->name = value;
 #include <libpstack/dwarf/tags.h>
 #undef DWARF_TAG
+   return 0;
+};
+
+static int
+ates_init( PyObject * object, PyObject * args, PyObject * kwds ) {
+   auto ates = ( PyDwarfBaseTypeEncodingsObject * )object;
+#define DWARF_ATE( name, value ) ates->name = value;
+#include <libpstack/dwarf/encodings.h>
+#undef DWARF_ATE
    return 0;
 };
 
@@ -1209,6 +1239,16 @@ PyInit_libCTypeGen( void )
    dwarfTagsType.tp_dealloc = nullptr;
    dwarfTagsType.tp_init = tags_init;
 
+   dwarfBaseTypeEncodingsType.tp_name = "DWARFBaseTypeEncodings";
+   dwarfBaseTypeEncodingsType.tp_flags = Py_TPFLAGS_DEFAULT;
+   dwarfBaseTypeEncodingsType.tp_basicsize =
+      sizeof( PyDwarfBaseTypeEncodingsObject );
+   dwarfBaseTypeEncodingsType.tp_methods = nullptr;
+   dwarfBaseTypeEncodingsType.tp_doc = "python attribute encoding names";
+   dwarfBaseTypeEncodingsType.tp_members = ate_members;
+   dwarfBaseTypeEncodingsType.tp_dealloc = nullptr;
+   dwarfBaseTypeEncodingsType.tp_init = ates_init;
+
    elfObjectType.tp_name = "libCTypeGen.ElfObject";
    elfObjectType.tp_flags = Py_TPFLAGS_DEFAULT;
    elfObjectType.tp_basicsize = sizeof( PyElfObject );
@@ -1268,6 +1308,7 @@ PyInit_libCTypeGen( void )
    } types[] = {
       { "DwarfTags", &dwarfTagsType },
       { "DwarfAttrs", &dwarfAttrsType },
+      { "DwarfBaseTypeEncodings", &dwarfBaseTypeEncodingsType },
       { "DwarfEntry", &dwarfEntryType },
       { "DwarfEntryIterator", &elfObjectType },
       { "DwarfUnitsIterator", &unitsIteratorType },
@@ -1292,13 +1333,16 @@ PyInit_libCTypeGen( void )
    attrs->ob_type->tp_init( attrs, nullptr, nullptr );
    PyModule_AddObject( module, "attrs", ( PyObject * )attrs );
 
+   auto encodings = PyObject_New( PyObject, &dwarfBaseTypeEncodingsType );
+   encodings->ob_type->tp_init( encodings, nullptr, nullptr );
+   PyModule_AddObject( module, "encodings", ( PyObject * )encodings );
+
    // add value->string mapping to name attributes and tags
    attrnames = make_attrnames();
    attrvalues = make_attrvalues();
    tagnames = make_tagnames();
    PyModule_AddObject( module, "attrnames", attrnames );
    PyModule_AddObject( module, "tagnames", tagnames );
-
    return module;
 }
 }

@@ -10,3 +10,6 @@
 [submodule "docs/external"]
 	path = docs/external
 	url = https://github.com/calevans/external
+[submodule "pstack"]
+	path = pstack
+	url = https://github.com/peadar/pstack
