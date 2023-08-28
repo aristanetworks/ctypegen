@@ -12,7 +12,7 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 #
-PYTHON ?= $(shell which python) # default to whatever interpreter is installed there.
+PYTHON ?= $(shell which python3) # default to whatever interpreter is installed there.
 PYTHONPATH ?= $(wildcard ../build/*lib*):..
 .PHONY: all check clean check-pre-mock check-mock check-ctypesanity
 
