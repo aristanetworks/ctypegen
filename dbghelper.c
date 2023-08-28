@@ -25,6 +25,7 @@
 #endif
 
 #include <sys/auxv.h>
+#include <sys/epoll.h>
 #include <sys/dir.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
