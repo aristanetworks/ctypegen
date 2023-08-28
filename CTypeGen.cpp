@@ -851,7 +851,7 @@ entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
 Py_hash_t
 entry_hash( PyObject * self ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   return hashfunc_result( ent->die.getOffset() ^ ent->die.getUnit()->offset );
+   return Py_hash_t( ent->die.getOffset() ^ ent->die.getUnit()->offset );
 }
 
 /*
