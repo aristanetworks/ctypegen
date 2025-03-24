@@ -24,7 +24,7 @@ all: build-all CMock/libc.py
 build-all: build-pstack
 	env CFLAGS="-g --std=c++20" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py build
 
-install: install-pstack
+install:
 	env CFLAGS="-g --std=c++20" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
 
 check: test
@@ -45,9 +45,6 @@ clean:
 	rm -rf build __pycache__ core CMock/libc.py libdbghelper.so *.o
 	rm -f CMock/libc.py 
 	make -C test clean
-
-install-pstack:
-	cd pstack && make install
 
 build-pstack:
 	cd pstack && cmake -DLIBTYPE=STATIC -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr/local && make && make check
