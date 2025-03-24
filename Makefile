@@ -50,4 +50,4 @@ install-pstack:
 	cd pstack && make install
 
 build-pstack:
-	cd pstack && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr/local && make && make check
+	cd pstack && cmake -DLIBTYPE=STATIC -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr/local && make && make check

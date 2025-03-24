@@ -13,11 +13,18 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-from distutils.core import setup
-from distutils.extension import Extension
-from distutils import unixccompiler
+from setuptools import setup
+from setuptools import Extension
+from setuptools.command.build_ext import build_ext
 import os
 import subprocess
+
+
+class ExtensionBuilder( build_ext ):
+    def build_extensions( self ):
+        self.compiler.src_extensions.append( ".s" )
+        super().build_extensions()
+
 
 with subprocess.Popen( [ "uname", "-m" ], stdout=subprocess.PIPE ) as pipe:
    ( out, err ) = pipe.communicate()
@@ -27,8 +34,6 @@ if arch == "i686":
 
 text = ""
 
-unixccompiler.UnixCCompiler.src_extensions += [ ".s" ]
-
 pstack_base = os.getenv( "PSTACK_BASE" )
 if pstack_base is None:
    pstack_base = os.getcwd() + "pstack"
@@ -37,7 +42,7 @@ pstack_extension_options = {
     'libraries' : [ 'dwelf' ],
     'include_dirs' : [ pstack_base ],
     'library_dirs' : [ pstack_base ],
-    'runtime_library_dirs' : [ pstack_base + "/lib" ],
+    'runtime_library_dirs' : [ pstack_base ],
 }
 
 setup( name="CTypeGen",
@@ -60,4 +65,7 @@ setup( name="CTypeGen",
         scripts=[
             "ctypegen"
         ],
+        cmdclass={
+            'build_ext': ExtensionBuilder
+            }
         )
