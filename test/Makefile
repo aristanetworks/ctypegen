@@ -19,11 +19,23 @@ PYTHONPATH ?= $(wildcard ../build/*lib*):..
 CXXFLAGS += -g3 -fPIC
 CFLAGS += -g3 -fPIC
 
+
+%-plt.o: %.cpp
+	$(CXX) -c -o $@ -fplt $(CXXFLAGS) $^
+
+%-noplt.o: %.cpp
+	$(CXX) -c -o $@ -fno-plt $(CXXFLAGS) $^
+
 all: check
 CTypeSanity: CTypeSanityC.o CTypeSanity.o
 	$(CXX) -shared -o $@ $^
 
-MockTest: MockTest.o MockTestExtern.o
+libMockTest-plt.so: MockTest-plt.o MockTestExtern-plt.o
+	$(CXX) -shared -o $@ $^
+libMockTest-noplt.so: MockTest-noplt.o MockTestExtern-noplt.o
+	$(CXX) -shared -o $@ $^
+
+libBitfieldTorture.so: BitfieldTorture.c
 	$(CXX) -shared -o $@ $^
 
 libPreMockTest.so: PreMockTest.o PreMockTestExtern.o
@@ -48,14 +60,16 @@ EnumTest.o: CXXFLAGS=-fshort-enums -fPIC -g
 libEnumTest.so: EnumTest.o
 	$(CXX) -shared -o $@ $^
 
-check-bins: CTypeSanity MockTest libPreMockTest.so libChainTest.so libFOpenTest.so \
-	libGreedyTest.so libEnumTest.so libSupply.so libDemand.so
+check-bins: CTypeSanity libMockTest-plt.so libMockTest-noplt.so \
+			libPreMockTest.so libChainTest.so libFOpenTest.so \
+			libGreedyTest.so libEnumTest.so libSupply.so libDemand.so \
+			libBitfieldTorture.so
 
 check-ctypesanity: check-bins
 	$(PYTHON) ./CTypeGenSanity.py ./CTypeSanity
 
 check-mock: check-bins
-	$(PYTHON) ./MockTest.py ./MockTest
+	$(PYTHON) ./MockTest.py ./libMockTest-noplt.so ./libMockTest-plt.so
 
 check-pre-mock: check-bins
 	$(PYTHON) ./PreMockTest.py ./libPreMockTest.so
@@ -75,8 +89,11 @@ check-pointers: check-bins
 check-supplydemand: check-bins
 	$(PYTHON) ./SupplyDemandGen.py
 
+check-bitfield: check-bins
+	$(PYTHON) ./BitfieldTortureGen.py
+
 check: check-mock check-pre-mock check-ctypesanity check-chain  check-pointers \
-	check-greedy check-enum check-supplydemand
+	check-greedy check-enum check-supplydemand check-bitfield
 
 # i386-only test.
 ifeq ($(shell uname -p),i686)
@@ -89,4 +106,7 @@ check: check-textRelocs
 endif
 
 clean:
-	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py *.so
+	rm -f *.o CTypeSanity CTypeSanity.py *.pyc MockTest proggen.py premock.py \
+		*.so BitfieldTorture.py chaintest.py Demand.py EnumGenerated.py \
+		GreedyTest.py ptrgen.py Supply.py
+

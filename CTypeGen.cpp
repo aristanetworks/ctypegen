@@ -26,7 +26,6 @@
 #include <structmember.h>
 
 #include <iostream>
-#include <deque>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -35,8 +34,8 @@
 #include <libpstack/elf.h>
 #include <libpstack/dwarf.h>
 #include <libpstack/stringify.h>
-#include <libpstack/global.h>
 
+using namespace pstack;
 namespace {
 
 /*
@@ -55,8 +54,6 @@ static PyTypeObject unitType = { PyObject_HEAD_INIT( 0 ) 0 };
 static PyObject * attrnames; // attribute name -> value mapping
 static PyObject * attrvalues; // attribute value -> name mapping
 static PyObject * tagnames;
-
-using namespace pstack;
 
 // These are the DWARF tags for DIEs that introduce a new namespace in C/C++
 static std::set< Dwarf::Tag > namespacetags = {
@@ -97,7 +94,7 @@ static int nextFileId = 1;
  */
 typedef struct {
    PyObject_HEAD
-   Dwarf::Info::Units units;
+   Dwarf::Units units;
 } PyUnits;
 
 /*
@@ -114,8 +111,8 @@ typedef struct {
  */
 typedef struct {
    PyObject_HEAD
-   Dwarf::Info::Units::iterator begin;
-   Dwarf::Info::Units::iterator end;
+   Dwarf::Units::iterator begin;
+   Dwarf::Units::iterator end;
 } PyDwarfUnitIterator;
 
 /*
@@ -580,7 +577,7 @@ unit_purge( PyObject * self, PyObject * args ) {
    Py_RETURN_NONE;
 }
 
-static Dwarf::ImageCache imageCache;
+static pstack::Context context;
 
 static PyObject *
 elf_open( PyObject * self, PyObject * args ) {
@@ -589,7 +586,7 @@ elf_open( PyObject * self, PyObject * args ) {
       Py_ssize_t imagelen;
       if ( !PyArg_ParseTuple( args, "s#", &image, &imagelen ) )
          return nullptr;
-      auto dwarf = imageCache.getDwarf( image );
+      auto dwarf = context.getDwarf( image );
       auto &it = openFiles[ dwarf.get()];
       if ( it != nullptr ) {
          // We already have a handle on this file - return the existing object.
@@ -622,7 +619,7 @@ elf_verbose( PyObject * self, PyObject * args ) {
    int verbosity;
    if ( !PyArg_ParseTuple( args, "I", &verbosity ) )
       return nullptr;
-   verbose = verbosity;
+   context.verbose = verbosity;
    Py_RETURN_NONE;
 }
 
@@ -631,7 +628,7 @@ elf_units( PyObject * self, PyObject * args ) {
    try {
       PyElfObject * elf = ( PyElfObject * )self;
       PyUnits * units = PyObject_New( PyUnits, &unitsType );
-      new ( &units->units ) Dwarf::Info::Units( elf->dwarf->getUnits() );
+      new ( &units->units ) Dwarf::Units( elf->dwarf->getUnits() );
       return ( PyObject * )units;
    } catch ( const std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
@@ -698,10 +695,13 @@ elf_dynaddrs( PyObject * self, PyObject * args ) {
       auto dynsyms = obj->dynamicSymbols();
       // First, create mapping from addr to list-of-dynamic-name
       if (dynsyms) {
-         for ( const auto & sym : *dynsyms ) {
+         auto start = dynsyms->begin();
+         for ( auto symi = start; symi != dynsyms->end(); ++symi) {
+            const auto & sym = *symi;
             if ( sym.st_shndx == SHN_UNDEF )
                continue;
-            if ( sym.isHidden() )
+            auto veridx = obj->versionIdxForSymbol(symi - start);
+            if ( veridx.isHidden() )
                continue;
             auto name = dynsyms->name( sym );
             if (name == "")
@@ -735,7 +735,7 @@ elf_symbol( PyObject * self, PyObject * args ) {
    if ( !PyArg_ParseTuple( args, "s", &name ) ) {
       return nullptr;
    }
-   auto sym = pyelf->dwarf->elf->findDynamicSymbol(name);
+   auto [sym,idx] = pyelf->dwarf->elf->findDynamicSymbol(name);
    if ( sym.st_shndx == SHN_UNDEF )
       Py_RETURN_NONE;
    return PyLong_FromLong ( sym.st_value );
@@ -764,7 +764,7 @@ static PyObject *
 elf_flush( PyObject * self, PyObject * args ) {
    try {
       PyElfObject * elf = ( PyElfObject * )self;
-      imageCache.flush( elf->obj );
+      context.flush( elf->obj );
    } catch ( std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
       return nullptr;
@@ -850,10 +850,15 @@ entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
    return richCompare( op, diff );
 }
 
-Py_hash_t
+#if PY_MAJOR_VERSION >= 3
+typedef Py_hash_t hashfunc_result;
+#else
+typedef long hashfunc_result;
+#endif
+hashfunc_result
 entry_hash( PyObject * self ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   return Py_hash_t( ent->die.getOffset() ^ ent->die.getUnit()->offset );
+   return hashfunc_result( ent->die.getOffset() ^ ent->die.getUnit()->offset );
 }
 
 /*
@@ -884,8 +889,8 @@ units_iterator( PyObject * self ) {
       PyUnits * units = ( PyUnits * )self;
       PyDwarfUnitIterator * it =
          PyObject_New( PyDwarfUnitIterator, &unitsIteratorType );
-      new ( &it->begin ) Dwarf::Info::Units::iterator( units->units.begin() );
-      new ( &it->end ) Dwarf::Info::Units::iterator( units->units.end() );
+      new ( &it->begin ) Dwarf::Units::iterator( units->units.begin() );
+      new ( &it->end ) Dwarf::Units::iterator( units->units.end() );
       return ( PyObject * )it;
    } catch ( const std::exception & ex ) {
       PyErr_SetString( PyExc_RuntimeError, ex.what() );
@@ -930,7 +935,8 @@ pyAttr( PyDwarfEntry *entry, Dwarf::AttrName name, const Dwarf::DIE::Attribute &
       switch (name) {
          case Dwarf::DW_AT_decl_file: {
             auto idx = intmax_t( attr );
-            auto lines = entry->die.getUnit()->getLines();
+            const std::unique_ptr<pstack::Dwarf::LineInfo> &lines =
+               entry->die.getUnit()->getLines();
             return makeString( lines->files[ idx ].name );
          }
          default:
@@ -1126,8 +1132,8 @@ unititer_next( PyObject * self ) {
 static void
 unititer_free( PyObject * o ) {
    PyDwarfUnitIterator * it = ( PyDwarfUnitIterator * )o;
-   it->begin.Dwarf::Info::Units::iterator::~iterator();
-   it->end.Dwarf::Info::Units::iterator::~iterator();
+   it->begin.Dwarf::Units::iterator::~iterator();
+   it->end.Dwarf::Units::iterator::~iterator();
    unitsIteratorType.tp_free( o );
 }
 
@@ -1163,7 +1169,11 @@ static PyMethodDef elf_methods[] = {
 static PyMethodDef units_methods[] = { { 0, 0, 0, 0 } };
 
 static PyNumberMethods units_asnumber = {
+#if PY_MAJOR_VERSION >= 3
    .nb_bool = units_asnumber_bool
+#else
+   .nb_nonzero = units_asnumber_bool
+#endif
 };
 
 static PyMethodDef unit_methods[] = {
@@ -1206,8 +1216,14 @@ static PySequenceMethods entry_sequence = {
 };
 
 PyMODINIT_FUNC
+#if PY_MAJOR_VERSION >= 3
 PyInit_libCTypeGen( void )
+#else
+initlibCTypeGen( void )
+#endif
 {
+#if PY_MAJOR_VERSION >= 3
+
    static struct PyModuleDef ctypeGenModule = {
       PyModuleDef_HEAD_INIT,
       "libCTypeGen", /* m_name */
@@ -1222,6 +1238,10 @@ PyInit_libCTypeGen( void )
 
    // Create our python module, and all our types.
    PyObject * module = PyModule_Create( &ctypeGenModule );
+#else
+   PyObject * module =
+      Py_InitModule3( "libCTypeGen", ctypegen_methods, "ELF helpers" );
+#endif
 
    dwarfAttrsType.tp_name = "DWARFAttrs";
    dwarfAttrsType.tp_flags = Py_TPFLAGS_DEFAULT;
@@ -1345,6 +1365,9 @@ PyInit_libCTypeGen( void )
    tagnames = make_tagnames();
    PyModule_AddObject( module, "attrnames", attrnames );
    PyModule_AddObject( module, "tagnames", tagnames );
+
+#if PY_MAJOR_VERSION >= 3
    return module;
+#endif
 }
 }

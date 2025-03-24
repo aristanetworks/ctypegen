@@ -13,9 +13,6 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-# This test ensures that we reuse the type from the "Supply" module when
-# generating the "Demand" module.
-
 import CTypeGen
 
 tortureModule, supplyResolver = CTypeGen.generateAll(

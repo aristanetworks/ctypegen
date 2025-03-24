@@ -474,11 +474,14 @@ PreMock::callbackFor( void * got, void * func ) {
 constexpr bool
 is_abs_reloc( int reloc_type ) {
 #if defined( __i386__ )
-   return reloc_type == R_386_32 || reloc_type == R_386_JMP_SLOT;
+   return reloc_type == R_386_32 || reloc_type == R_386_JMP_SLOT
+      || reloc_type == R_386_GLOB_DAT;
 #elif defined( __x86_64__ )
-   return reloc_type == R_X86_64_JUMP_SLOT;
+   return reloc_type == R_X86_64_JUMP_SLOT
+      || reloc_type == R_X86_64_GLOB_DAT || reloc_type == R_X86_64_64;
 #elif defined( __aarch64__ )
-   return reloc_type == R_AARCH64_GLOB_DAT || reloc_type == R_AARCH64_JUMP_SLOT;
+   return reloc_type == R_AARCH64_GLOB_DAT || reloc_type == R_AARCH64_JUMP_SLOT
+      || reloc_type == R_AARCH64_ABS64;
 #else
 #error "unsupported architecture"
 #endif
@@ -507,7 +510,9 @@ Replacement::set( const MemoryProtection & addressSpace,
          throw std::runtime_error( "unsupported relocation type" );
       }
 #else
-      throw std::runtime_error( "unsupported relocation type" );
+      std::ostringstream s;
+      s << "unspported relocation type " << rtype;
+      throw std::runtime_error( s.str() );
 
 #endif
    }
@@ -572,7 +577,6 @@ GOTMock::processLibrary( const MemoryProtection & addressSpace,
    ElfW( Word ) jmp_rel_len = -1, rel_len = -1;
    ElfW( Sym ) * symbols = 0;
    const char * strings = 0;
-   bool text_relocs = false;
 
    // don't stub calls from libpython, libc, or ourselves.
    if ( strstr( libname, "libpython" ) )
@@ -584,6 +588,27 @@ GOTMock::processLibrary( const MemoryProtection & addressSpace,
 
    for ( auto i = 0; dynamic[ i ].d_tag != DT_NULL; ++i ) {
       auto & dyn = dynamic[ i ];
+      // We are mostly interested in the relocation entries in the dynamic
+      // section. We then also need the symbol table and string table in order
+      // to make sense of those relocations that refer to symbols.
+      //
+      // There are two distinct sets of relocations for any given object -
+      //
+      // the DT_REL (or DT_RELA) section includes relocations that have to be
+      // performed at load time. These correspond to the .rel.dyn or .rela.dyn
+      // section
+      //
+      // The DT_JMPREL section includes relocations that may be delayed until
+      // the PLT entry for the given function is called. These correspond to
+      // the .rel.plt or .rela.plt section
+      //
+      // Each relocation section can contain either ElfXX_Rel or ElfXX_Rela
+      // relocations. The name of the tag implies the type for DT_REL/DT_RELA.
+      // For DT_JMPREL, we look at DT_PLTREL to get an indication as to the
+      // type.
+      //
+      // Each architecture uses either "Rel" or "Rela" locations - ARM and
+      // x86_64 (and any new platforms) use Rela, i366 uses "rel"
       switch ( dyn.d_tag ) {
        case DT_REL:
          rel = ( ElfW( Rel ) * )( dyn.d_un.d_ptr );
@@ -602,7 +627,6 @@ GOTMock::processLibrary( const MemoryProtection & addressSpace,
          // this is an indicator that there are text relocations present. This
          // should only happen on i386, where you can dynamically link non-PIC
          // code
-         text_relocs = true;
          break;
 
        case DT_PLTREL:
@@ -624,6 +648,7 @@ GOTMock::processLibrary( const MemoryProtection & addressSpace,
       }
    }
 
+   // Process PLT-based relocations, with the relocation type derived from DT_PLTREL
    switch ( reltype ) {
     case DT_REL:
       processRelocs(
@@ -634,20 +659,20 @@ GOTMock::processLibrary( const MemoryProtection & addressSpace,
          addressSpace, loadaddr, jmprela, jmp_rel_len, symbols, function, strings );
       break;
     default:
+      if ( jmprela || jmprel ) {
+         throw std::runtime_error( "can't process DT_JMPREL without DT_PLTREL" );
+      }
       break;
    }
 
-   if ( text_relocs ) {
-      // We really only will ever see "rel" here - i386 doesn't use rela, and
-      // we would not get both in the same ELF file anyway.
-      if ( rel ) {
-         processRelocs(
-            addressSpace, loadaddr, rel, rel_len, symbols, function, strings );
-      }
-      if ( rela ) {
-         processRelocs(
-            addressSpace, loadaddr, rela, rel_len, symbols, function, strings );
-      }
+   // Process general/non-lazy relocations, with type dependent on the tag we found
+   if ( rel ) {
+      processRelocs(
+         addressSpace, loadaddr, rel, rel_len, symbols, function, strings );
+   }
+   if ( rela ) {
+      processRelocs(
+         addressSpace, loadaddr, rela, rel_len, symbols, function, strings );
    }
 }
 
@@ -993,8 +1018,13 @@ static PyMethodDef mock_methods[] = {
  * Initialize python library
  */
 PyMODINIT_FUNC
+#if PY_MAJOR_VERSION >= 3
 PyInit_libCTypeMock( void )
+#else
+initlibCTypeMock( void )
+#endif
 {
+#if PY_MAJOR_VERSION >= 3
    static struct PyModuleDef ctypeMockModule = {
       PyModuleDef_HEAD_INIT,
       "libCTypeMock", /* m_name */
@@ -1007,6 +1037,10 @@ PyInit_libCTypeMock( void )
       NULL, /* m_free */
    };
    PyObject * module = PyModule_Create( &ctypeMockModule );
+#else
+   PyObject * module =
+      Py_InitModule3( "libCTypeMock", mock_methods, "CTypeMock C support" );
+#endif
    populateType< StompMock >(
       module, stompObjectType, "StompMock", "A stomping mock" );
    populateType< GOTMock >(
@@ -1014,7 +1048,9 @@ PyInit_libCTypeMock( void )
    populateType< PreMock >(
       module, preObjectType, "PreMock", "A pre-executing GOT hijacking mock" );
 
+#if PY_MAJOR_VERSION >= 3
    return module;
+#endif
 }
 
 /*

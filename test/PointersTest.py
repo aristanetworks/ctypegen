@@ -23,7 +23,7 @@ import sys
 if len( sys.argv ) >= 2:
    mocklib = sys.argv[ 1 ]
 else:
-   mocklib = "libFOpenTest.so"
+   mocklib = "./libFOpenTest.so"
 
 # Generate type info for "fopen_test"
 module, resolver = generate( mocklib,
@@ -40,7 +40,6 @@ openFiles = []
 
 # redirect all fopen and fopen64 calls to open /dev/zero
 def impl( name, mode, func ):
-   global openFiles
    openFiles.append( name )
    return func( b"/dev/zero", mode )
 

@@ -12,7 +12,7 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-.PHONY: all test install clean build-all
+.PHONY: all check test install clean build-all
 
 PYTHON ?= $(shell which python3) # default to where we find python3
 
@@ -21,11 +21,13 @@ PYTHONPATH = $(PWD):`echo $(PWD)/build/lib*`
 all: build-all CMock/libc.py
 	echo "Built for $(PYTHON)"
 
-build-all:
-	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py build
+build-all: build-pstack
+	env CFLAGS="-g --std=c++20" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py build
 
-install:
-	env CFLAGS="-g --std=c++14" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
+install: install-pstack
+	env CFLAGS="-g --std=c++20" PYTHONPATH=$(PWD) $(PYTHON) ./setup.py install
+
+check: test
 test:
 	PYTHONPATH=$(PYTHONPATH) make -C test
 	echo "Tested for $(PYTHON)"
@@ -41,4 +43,11 @@ CMock/libc.py: libdbghelper.so build-all
 
 clean:
 	rm -rf build __pycache__ core CMock/libc.py libdbghelper.so *.o
+	rm -f CMock/libc.py 
 	make -C test clean
+
+install-pstack:
+	cd pstack && make install
+
+build-pstack:
+	cd pstack && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr/local && make && make check

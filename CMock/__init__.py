@@ -18,6 +18,8 @@ import site
 import glob
 import libCTypeMock
 import _ctypes
+import os
+import traceback
 
 # We need to look inside ctypes a bit, so, pylint: disable=protected-access
 
@@ -43,6 +45,26 @@ assert cmockCdll
 cmockCdll.cfuncTypeToPtrToFunc.restype = c_void_p
 cmockCdll.cfuncTypeToPtrToFunc.argtypes = [ c_void_p ]
 
+def exceptionWrapper( method ):
+   ''' If an exception is raised during the processing of the python mock
+   function, ctypes/ffi will just ignore the exception. That's exactly the
+   opposite of what we want - as we regularly want to do things like assert
+   from callbacks. So, wrap the mock functions to ensure that if any exception
+   is raised, we print the error, and then abort, rather than ignoring, and
+   just returning. '''
+   def handler( *kwargs ):
+      try:
+         rc = method( *kwargs )
+      except Exception as ex: # see above - pylint: disable=broad-except
+         sys.stderr.write(
+               "python exception while running mock function. Exception details:\n" )
+         traceback.print_exception( None, ex, ex.__traceback__ )
+         sys.stderr.flush()
+         os.abort()
+      return rc
+   return handler
+
+
 class mocked:
    def __init__( self, function, python, library=None, method=GOT ):
       # ensure a reference to "function" lives as long as the mock
@@ -55,7 +77,7 @@ class mocked:
          callbackReturnType = c_void_p
       callbackType = CFUNCTYPE( callbackReturnType, *function.argtypes,
                                 use_errno=True )
-      self.callback = callbackType( python )
+      self.callback = callbackType( exceptionWrapper( python ) )
       callbackForC = cmockCdll.cfuncTypeToPtrToFunc( self.callback )
       handle = library._handle if library else 0
       if method == GOT:

@@ -25,6 +25,7 @@ import keyword
 import ast
 import functools
 import operator
+import re
 
 from collections import defaultdict
 
@@ -36,6 +37,7 @@ import libCTypeGen # pylint: disable=import-error
 
 tags = libCTypeGen.tags
 attrs = libCTypeGen.attrs
+enc = libCTypeGen.encodings
 
 # Provide aliases for tag names so users don't have to delve into libCTypeGen
 ELEMENT_STRUCT = tags.DW_TAG_structure_type
@@ -50,23 +52,6 @@ TAGGED_ELEMENTS = {
    ELEMENT_CLASS,
    ELEMENT_ENUM,
  }
-
-try:
-   dict.iteritems
-except AttributeError:
-   # Python 3
-   def itervalues( d ):
-      return iter( d.values() )
-
-   def iteritems( d ):
-      return iter( d.items() )
-else:
-   # Python 2
-   def itervalues( d ):
-      return d.itervalues()
-
-   def iteritems( d ):
-      return d.iteritems()
 
 # Add explicit dependency on CTypeGen runtime - we need this when we run the
 # sanity check on the generated file.
@@ -425,6 +410,8 @@ def isEmptyBase( member ):
    return True
 
 def die_size( die ):
+   if die is None:
+      return 0 # Assume we don't care.
    if die.DW_AT_byte_size is not None:
       return die.DW_AT_byte_size
 
@@ -916,6 +903,157 @@ class EnumType( Type ):
 def _align( _32, _64 ):
    return _32 if ctypes.sizeof( ctypes.c_void_p ) == 4 else _64
 
+
+# DWARF4 specs
+# (DW_AT_encoding, DW_AT_byte_size) -> (ctype, alignment)
+_baseTypeEncoding = {
+   # enc.DW_ATE_address
+   # not sure how to create it
+
+   ( enc.DW_ATE_boolean, 1 ) : ( "c_bool", _align( 1, 1 ) ),
+
+   # float _Complex __attribute__((mode(TC)))
+   ( enc.DW_ATE_complex_float, 32 ) : ( "(c_longdouble * 2)", _align( 16, 16 ) ),
+   # float _Complex __attribute__((mode(XC)))
+   # 32 bit only, on 64 bit mode XC is equivalent to mode TC
+   ( enc.DW_ATE_complex_float, 24 ) : ( "(c_longdouble * 2)", _align( 4, None ) ),
+   # float _Complex __attribute__((mode(DC)))
+   ( enc.DW_ATE_complex_float, 16 ) : ( "(c_longdouble)", _align( 8, 8 ) ),
+   # float _Complex __attribute__((mode(SC)))
+   ( enc.DW_ATE_complex_float, 8 ) : ( "c_double", _align( 4, 4 ) ),
+
+   # float
+   ( enc.DW_ATE_float, 4 ) : ( "c_float", _align( 4, 4 ) ),
+   # double
+   ( enc.DW_ATE_float, 8 ) : ( "c_double", _align( 8, 8 ) ),
+   # long double
+   # 32 bit only
+   ( enc.DW_ATE_float, 12 ) : ( "c_longdouble", _align( 4, None ) ),
+   # _Float128 aka float __attribute__((mode(TF)))
+   ( enc.DW_ATE_float, 16 ) : ( "c_longdouble", _align( 16, 16 ) ),
+
+   ( enc.DW_ATE_signed, 1 ) : ( "c_char", _align( 1, 1 ) ),
+   # short int
+   ( enc.DW_ATE_signed, 2 ) : ( "c_short", _align( 2, 2 ) ),
+   # int
+   ( enc.DW_ATE_signed, 4 ) : ( "c_int", _align( 4, 4 ) ),
+   # long long int
+   ( enc.DW_ATE_signed, 8 ) : ( "c_longlong", _align( 8, 8 ) ),
+   # _int128
+   ( enc.DW_ATE_signed, 16 ) : ( "(c_longlong * 2)", _align( None, 16 ) ),
+
+   # char
+   ( enc.DW_ATE_signed_char, 1 ) : ( "c_char", _align( 1, 1 ) ),
+
+   ( enc.DW_ATE_unsigned, 1 ) : ( "c_uchar", _align( 1, 1 ) ),
+   # unsigned short int
+   ( enc.DW_ATE_unsigned, 2 ) : ( "c_ushort", _align( 2, 2 ) ),
+   # unsigned int
+   ( enc.DW_ATE_unsigned, 4 ) : ( "c_uint", _align( 4, 4 ) ),
+   # unsigned long long int
+   ( enc.DW_ATE_unsigned, 8 ) : ( "c_ulonglong", _align( 8, 8 ) ),
+   # _int128 unsigned
+   ( enc.DW_ATE_unsigned, 16 ) : ( "(c_ulonglong * 2)", _align( None, 16 ) ),
+
+   # unsigned char
+   ( enc.DW_ATE_unsigned_char, 1 ) : ( "c_uchar", _align( 1, 1 ) ),
+
+   # enc.DW_ATE_imaginary_float
+   # Gcc and Clang decided to not implement this
+
+   # some COBOL specific things we dont care about
+   # enc.DW_ATE_packed_decimal
+   # enc.DW_ATE_numeric_string
+   # enc.DW_ATE_edited
+
+   # Our ARM machines (at least abs102) says
+   # fixed floating points are not supported
+   # enc.DW_ATE_signed_fixed
+   # enc.DW_ATE_unsigned_fixed
+
+   # _Decimal32
+   ( enc.DW_ATE_decimal_float, 4 ) : ( "c_int", _align( 4, 4 ) ),
+   # _Decimal64
+   ( enc.DW_ATE_decimal_float, 8 ) : ( "c_longlong", _align( 8, 8 ) ),
+   # _Decimal128
+   ( enc.DW_ATE_decimal_float, 16 ) : ( "(c_longlong * 2)", _align( 16, 16 ) ),
+
+   # enc.DW_ATE_UTF
+   # im not sure how to get example of this
+
+   # enc.DW_AT_lo_user == 0x80
+   # GNU extension of complex floats, but with integers aka
+   # int _Complex
+   # but its kinda weird too:
+   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=93988
+   # so decided to just leave it alone
+}
+
+def alignmentFromEncoding( die ):
+   # Dereference aliases/typedefs/enums until we get something with an
+   # encoding.
+   while die.DW_AT_encoding is None:
+      die = die.DW_AT_type
+   encoding = die.DW_AT_encoding
+   byteSize = die.DW_AT_byte_size
+   key = ( encoding, byteSize )
+   if key not in _baseTypeEncoding:
+      raise Exception( f"no python ctype for primitive C type with "
+                       f"(encoding, size): {key}" )
+   align = _baseTypeEncoding[ key ][ 1 ]
+   if align is None:
+      raise Exception( f"no python ctype for primitive C type with "
+                       f"(encoding, size): {key} on this architecture" )
+   return align
+
+_baseTypes = {
+      "long long unsigned int" : ( "c_ulonglong", _align( 4, 8 ) ),
+      "unsigned long long" : ( "c_ulonglong", _align( 4, 8 ) ),
+      "long long int" : ( "c_longlong", _align( 4, 8 ) ),
+      "long long" : ( "c_longlong", _align( 4, 8 ) ),
+      "long unsigned int" : ( "c_ulong", _align( 4, 8 ) ),
+      "unsigned long" : ( "c_ulong", _align( 4, 8 ) ),
+      "sizetype" : ( "c_ulong", _align( 4, 8 ) ),
+      "short unsigned int" : ( "c_ushort", _align( 2, 2 ) ),
+      "unsigned short" : ( "c_ushort", _align( 2, 2 ) ),
+      "unsigned int" : ( "c_uint", _align( 4, 4 ) ),
+      "unsigned char" : ( "c_ubyte", _align( 1, 1 ) ),
+      "char16_t" : ( "c_short", _align( 2, 2 ) ),
+      "signed char" : ( "c_byte", _align( 1, 1 ) ),
+      "char" : ( "c_char", _align( 1, 1 ) ),
+      "long int" : ( "c_long", _align( 4, 8 ) ),
+      "long" : ( "c_long", _align( 4, 8 ) ),
+      "int" : ( "c_int", _align( 4, 4 ) ),
+      "short int" : ( "c_short", _align( 2, 2 ) ),
+      "short" : ( "c_short", _align( 2, 2 ) ),
+      "__ARRAY_SIZE_TYPE__" : ( "c_ulong", _align( 4, 8 ) ),
+      "float" : ( "c_float", _align( 4, 4 ) ),
+      "_Bool" : ( "c_bool", _align( 1, 1 ) ),
+      "bool" : ( "c_bool", _align( 1, 1 ) ),
+      "double" : ( "c_double", _align( 4, 8 ) ),
+      "long double" : ( "c_longdouble", _align( 4, 16 ) ),
+      # ctypes has no type for 128 bit floats - do our best.
+      # There are no 128-bit ints on 32-bit
+      "_Float128" : ( "c_longdouble", _align( 16, 16 ) ),
+      "__float128" : ( "c_longdouble", _align( 16, 16 ) ),
+      "__int128" : ( "(c_longlong * 2)", _align( None, 16 ) ),
+      "__int128 unsigned" : ( "(c_ulonglong * 2)", _align( None, 16 ) ),
+      "wchar_t" : ( "c_wchar", _align( 4, 4 ) ),
+      "char32_t" : ( "c_int", _align( 4, 4 ) ),
+}
+
+def baseTypeAlignment( die ):
+   name = die.DW_AT_name
+   if not name in _baseTypes:
+      return alignmentFromEncoding( die )
+   align = _baseTypes[ name ][ 1 ]
+   if align is None:
+      raise Exception( f"no python ctype for primitive C type {name} "
+                       "on this architecture" )
+   return align
+
+
+
 class PrimitiveType( Type ):
    ''' Primitive types from DWARF/C: key is the C name. value is a tuple.
    The tuple contains the name of the ctypes equivalent type, the alignment of
@@ -923,72 +1061,23 @@ class PrimitiveType( Type ):
    '''
    _slots__ = []
 
-
-   baseTypes = {
-         "long long unsigned int" : ( "c_ulonglong", _align(4, 8) ),
-         "unsigned long long" : ( "c_ulonglong", _align(4, 8) ),
-         "long long int" : ( "c_longlong", _align(4, 8) ),
-         "long long" : ( "c_longlong", _align(4, 8) ),
-         "long unsigned int" : ( "c_ulong", _align(4, 8) ),
-         "unsigned long" : ( "c_ulong", _align( 4, 8 ) ),
-         "sizetype" : ( "c_ulong", _align( 4, 8 ) ),
-         "short unsigned int" : ( "c_ushort", _align( 2, 2 ) ),
-         "unsigned short" : ( "c_ushort", _align( 2, 2 ) ),
-         "unsigned int" : ( "c_uint", _align( 4, 4 ) ),
-         "unsigned char" : ( "c_ubyte", _align( 1, 1 ) ),
-         "char16_t" : ( "c_short", _align( 2, 2 ) ),
-         "signed char" : ( "c_byte", _align( 1, 1 ) ),
-         "char" : ( "c_char", _align( 1, 1 ) ),
-         "long int" : ( "c_long", _align( 4, 8 ) ),
-         "long" : ( "c_long", _align( 4, 8 ) ),
-         "int" : ( "c_int", _align( 4, 4 ) ),
-         "short int" : ( "c_short", _align( 2, 2 ) ),
-         "short" : ( "c_short", _align( 2, 2 ) ),
-         "__ARRAY_SIZE_TYPE__": ( "c_ulong", _align( 4, 8 ) ),
-         "float" : ( "c_float", _align( 4, 4 ) ),
-         "_Bool" : ( "c_bool", _align( 1, 1 ) ),
-         "bool" : ( "c_bool", _align( 1, 1 ) ),
-         "double" : ( "c_double", _align( 4, 8 ) ),
-         "long double" : ( "c_longdouble", _align( 4, 16 ) ),
-         # ctypes has no type for 128 bit floats - do our best.
-         # There are no 128-bit ints on 32-bit
-         "_Float128" : ( "c_longdouble", _align( 16, 16 ) ),
-         "__float128" : ( "c_longdouble", _align( 16, 16 ) ),
-         "__int128" : ( "(c_longlong * 2)", _align( None, 16 ) ),
-         "__int128 unsigned" : ( "(c_ulonglong * 2)", _align( None, 16 ) ),
-         "wchar_t" : ( "c_wchar", _align( 4, 4 ) ),
-         "char32_t" : ( "c_int", _align( 4, 4 ) ),
-   }
-
    def alignment( self ):
-      name = self.die.DW_AT_name
-      if not name in PrimitiveType.baseTypes:
-         raise Exception( f"no python ctype for primitive C type {name}" )
-      align = PrimitiveType.baseTypes[ name ][ 1 ]
-      if align is None:
-         if die.DW_AT_encoding == 0x3: # Complex float.
-             return die.DW_AT_byte_size / 2
-         raise Exception( f"no python ctype for primitive C type {name} "
-                          "on this architecture" )
-      return align
+      return baseTypeAlignment( self.die )
 
    def name( self, withTag=True ):
       return self.ctype()
 
    def ctype( self ):
       name = self.die.DW_AT_name
-      if not name in PrimitiveType.baseTypes:
-         defn = self.definition()
-         if defn.DW_AT_encoding == 0x3: # Complex float.
-            if defn.DW_AT_byte_size == 32:
-               return u'(c_longdouble * 2 )'
-            if defn.DW_AT_byte_size == 16:
-               return u'(c_double * 2 )'
-            return u'(c_float * 2 )'
+      if not name in _baseTypes:
          # if we can't parse the primitive type, just treat it as an array of
-         # bytes.
+         # bytes. We see this for the _Complex type defined in stdio.h on
+         # centos 9 as
+         # ```
+         # typedef
+         # _Complex float __cfloat128 __attribute__ ((__mode__ (__TC__)));
          return f"(c_byte * {self.die.DW_AT_byte_size})"
-      return PrimitiveType.baseTypes[ name ][ 0 ]
+      return _baseTypes[ name ][ 0 ]
 
 
 def getArrayDimensions( die ):
@@ -1363,6 +1452,8 @@ class TypeResolver:
                bytag[ tag ] = newType
                return newType
 
+      while die.tag() not in typeFromTag:
+         die = die.DW_AT_type
       newType = typeFromTag[ die.tag() ]( self, die )
       bytag[ tag ] = newType
       return newType
@@ -1478,13 +1569,13 @@ from CTypeGenRun import * # pylint: disable=wildcard-import
       # Define any types needed by variables or functions, as they may
       # contribute to self.types.
 
-      for name, die in iteritems( self.variables ):
+      for name, die in self.variables.items():
          if die is None:
             self.errorfunc( "variable %s not found" % name )
          else:
             self.defineType( self.dieToType( die.DW_AT_type ), stream )
 
-      for name, die in sorted( iteritems( self.functions ) ):
+      for name, die in sorted( self.functions.items() ):
          if die:
             self.dieToType( die ).define( stream )
          else:
@@ -1816,7 +1907,7 @@ def generateDwarf( binaries, outname, types, functions, header=None, modname=Non
       frame = stack[ 1 ]
       callerSource = frame[ 1 ]
 
-      warning = '# DO NOT EDIT THIS FILE. It was generated by %s\n' % callerSource
+      warning = f"# DON'T EDIT THIS FILE. It was generated by\n# {callerSource}\n\n"
 
       content.write( warning )
       if header is not None:
@@ -1850,6 +1941,7 @@ def decoratedLib( idx = 0 ):
 
       content.write( "CTYPEGEN_producers__ = {\n" )
       for p in sorted( resolver.producers ):
+         p = re.sub( '"', r'\"', p )
          content.write( "\t\"%s\",\n" % p )
       content.write( "}\n" )
 

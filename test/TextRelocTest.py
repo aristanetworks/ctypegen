@@ -26,16 +26,13 @@ function
 import CMock
 import subprocess
 from ctypes import CDLL, c_int
-import sys
 
-LIBRARY = "TextRelocs" if len(sys.argv) <= 1 else sys.argv[1]
-
+LIBRARY = "TextRelocs" if len( sys.argv ) <= 1 else sys.argv[ 1 ]
 nonPicLib = CDLL( LIBRARY )
-with subprocess.Popen( ("readelf -W --dynamic ./%s" % LIBRARY).split( " " ),
+with subprocess.Popen( f"readelf -W --dynamic {LIBRARY}".split( " " ),
       stdout=subprocess.PIPE, universal_newlines=True ) as proc:
    out, err = proc.communicate()
 assert "(TEXTREL)" in out # make sure we actually have a text relocation
-print("have textrel in %s" % LIBRARY)
 
 nonPicLib.doubleIt.argtypes = [ c_int ]
 nonPicLib.entryPoint.argtypes = [ c_int ]
@@ -43,4 +40,3 @@ nonPicLib.entryPoint.argtypes = [ c_int ]
 with CMock.mocked( nonPicLib.doubleIt, lambda value: value // 2 ):
    value = nonPicLib.entryPoint( 42 )
    assert value == 21
-print("GOT mock worked")

@@ -31,14 +31,13 @@ unixccompiler.UnixCCompiler.src_extensions += [ ".s" ]
 
 pstack_base = os.getenv( "PSTACK_BASE" )
 if pstack_base is None:
-   pstack_base = "/usr/local"
+   pstack_base = os.getcwd() + "pstack"
 
 pstack_extension_options = {
     'libraries' : [ 'dwelf' ],
-    'include_dirs' : [ pstack_base + "/include" ],
-    'library_dirs' : [ pstack_base + "/lib" ],
+    'include_dirs' : [ pstack_base ],
+    'library_dirs' : [ pstack_base ],
     'runtime_library_dirs' : [ pstack_base + "/lib" ],
-    'extra_compile_args' : [ '--std=c++17' ],
 }
 
 setup( name="CTypeGen",
