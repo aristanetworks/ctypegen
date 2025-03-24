@@ -7,33 +7,21 @@ It also includes a mocking framework that allows you to mock out functions calle
 by your C code and intercept them with python code instead.
 
 ## Building
+
 This package depends on the `pstack` project [here](http://github.com/peadar/pstack)
 
-You'll need a C++14-capable compiler to generate `pstack` and `CTypeGen`
+pstack is configured as a submodule for this repository.
 
-You need to build `pstack` with shared libraries enabled, and then make
-and install this package. For example
+You'll need cmake, and a C++20-capable compiler to generate `pstack` and `CTypeGen`
 
+To build:
 ```
-$ git clone http://github.com/peadar/pstack
 $ git clone http://github.com/aristanetworks/ctypegen
-$ cd pstack
-$ cmake -DCMAKE_BUILD_TYPE=Release -DLIBTYPE=SHARED .
-$ make
-$ sudo make install
-$ cd ../CTypeGen
+$ cd ctypegen
+$ git submodule update
 $ make
 $ sudo make install
 $ make test
-```
-
-By default, Python 2 modules are installed. You can pass `PYTHON=python3`
-when building to get Python 3 modules:
-
-```
-$ make PYTHON=python3
-$ sudo make PYTHON=python3 install
-$ make PYTHON=python3 test
 ```
 
 ## Generating Boilerplate
