@@ -17,7 +17,6 @@
 import datetime
 import io
 import os.path
-import imp
 import inspect
 import sys
 import ctypes
@@ -26,6 +25,7 @@ import ast
 import functools
 import operator
 import re
+from importlib.machinery import SourceFileLoader
 
 from collections import defaultdict
 
@@ -1953,11 +1953,11 @@ def decoratedLib( idx = 0 ):
          content.write( trailer )
 
    if modname is None:
-      modname = outname.split( "." )[ 0 ]
-   mod = imp.load_source( modname, outname )
+      modname = os.path.basename( outname ).split( "." )[ 0 ]
+   mod = SourceFileLoader( modname, outname ).load_module()
    # pylint: disable=protected-access
    mod.test_classes( mod.__ctypegen_failed_macros )
    # pylint: enable=protected-access
    resolver.pkgname = modname
-   sys.stderr.write( "generated and tested %s\n" % modname )
+   sys.stderr.write( f"generated and tested {outname} ('{modname}')\n" )
    return ( mod, resolver )
