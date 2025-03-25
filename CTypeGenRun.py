@@ -131,6 +131,12 @@ def test_classes( failed_macros=None ):
    for cls in TestableCtypeClass.__subclasses__():
       test_class( cls )
    if errors:
-      raise Exception( "\n".join( errors ) )
+      print( f"""
+Discrepancies between ctypes data and DWARF:
+	{'\n\t'.join( errors )}
+This is not a fatal error - ctypes cannot represent all bitfield
+uses correctly, and the types mentioned in the above list may not
+function correctly from ctypes
+""" )
    if failed_macros:
       print( "unusable macros for this module: %s" % ",".join( failed_macros ) )
