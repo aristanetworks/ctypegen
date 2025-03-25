@@ -1,13 +1,1 @@
-**/*.pyc
-**/*.o
-**/core
-**/*.swp
-**/*.swo
 **/__pycache__
-**/t
-**/*.rej
-**/*.orig
-**/*.so
-build
-**/orig
-tags
