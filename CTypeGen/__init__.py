@@ -33,13 +33,13 @@ import CTypeGen.expression
 
 # the following modules are dynamically generated inside the C extension.
 # pylint should ignore them
-import libCTypeGen # pylint: disable=import-error
+import _CTypeGen # pylint: disable=import-error
 
-tags = libCTypeGen.tags
-attrs = libCTypeGen.attrs
-enc = libCTypeGen.encodings
+tags = _CTypeGen.tags
+attrs = _CTypeGen.attrs
+enc = _CTypeGen.encodings
 
-# Provide aliases for tag names so users don't have to delve into libCTypeGen
+# Provide aliases for tag names so users don't have to delve into _CTypeGen
 ELEMENT_STRUCT = tags.DW_TAG_structure_type
 ELEMENT_UNION = tags.DW_TAG_union_type
 ELEMENT_CLASS = tags.DW_TAG_class_type
@@ -1723,7 +1723,7 @@ def getlib( libname ):
       lib = ctypes.CDLL( libname )
       handle = lib._handle # pylint: disable=protected-access
       libname = ctypes.cast( handle, ctypes.POINTER( LinkMap ) )[ 0 ].name
-   return libCTypeGen.open( libname )
+   return _CTypeGen.open( libname )
 
 def getDwarves( libnames ):
    # Allow libnames to be a single string, or list thereof.

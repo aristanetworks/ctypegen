@@ -23,6 +23,8 @@ there. '''
 from CTypeGen import generate, PythonType
 import sys
 import platform
+import _dbghelper
+import ctypes
 
 # packing issues differ from platform to platform - these set of types need to
 # be explicitly packed, or are somehow broken on their respective
@@ -106,9 +108,21 @@ def notBroken( die ):
       return PythonType( fname, pack=True, unalignedPtrs=True )
    return die.fullname() not in broken
 
+
+# Contorted way of finding the name of the C library.
+class Dl_info(ctypes.Structure):
+    _fields_ = [("dli_fname", ctypes.c_char_p),
+                ("dli_fbase", ctypes.c_void_p),
+                ("dli_sname", ctypes.c_char_p),
+                ("dli_saddr", ctypes.c_void_p)]
+
+info = Dl_info()
+libc = ctypes.CDLL("libc.so.6")
+libc.dladdr( libc.getpid, ctypes.byref( info ) )
+
 generate(
-      [ "./libdbghelper.so", sys.argv[ 1 ] ],
-      sys.argv[ 2 ],
+      [ _dbghelper.__file__, info.dli_fname ],
+      sys.argv[ 1 ],
       types=notBroken,
       functions=lambda die: notBroken( die ) and haveDyn( die ),
       macroFiles='dbghelper.c',

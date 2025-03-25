@@ -16,7 +16,7 @@ import sys
 from ctypes import CDLL, CFUNCTYPE, c_void_p, cast
 import site
 import glob
-import libCTypeMock
+import _CMock
 import _ctypes
 import os
 import traceback
@@ -27,21 +27,10 @@ GOT = 1    # GOT mock: use the GOT table to hook the target function with the mo
 STOMP = 2  # STOMP mock: overwrite the start of the target function to call the mock
 PRE = 3    # PRE mock: GOT mock, but after mock call, call the original function too.
 
-# we need to load the libCTypeGen library as a CDLL, so we can call an
+# we need to load the _CTypeGen library as a CDLL, so we can call an
 # entry point in it through ctypes, to convert a python function into a
 # C pointer-to-function.
-cmockCdll = None
-for sitedir in site.getsitepackages():
-   for libName in glob.glob( "%s/libCTypeMock*.so" % sitedir ):
-      try:
-         cmockCdll = CDLL( libName )
-         break
-      except OSError:
-         pass
-
-if cmockCdll is None:
-   cmockCdll = CDLL( "libCTypeMock.so" )
-assert cmockCdll
+cmockCdll = CDLL( _CMock.__file__ )
 cmockCdll.cfuncTypeToPtrToFunc.restype = c_void_p
 cmockCdll.cfuncTypeToPtrToFunc.argtypes = [ c_void_p ]
 
@@ -81,14 +70,14 @@ class mocked:
       callbackForC = cmockCdll.cfuncTypeToPtrToFunc( self.callback )
       handle = library._handle if library else 0
       if method == GOT:
-         self.mock = libCTypeMock.GOTMock( linkername, callbackForC, handle )
+         self.mock = _CMock.GOTMock( linkername, callbackForC, handle )
          # "realfunc" only works for GOT mocks: STOMP mocks would just recurse
          # infinitely.
          self.realfunc = cast( self.mock.realfunc(), callbackType )
       elif method == STOMP:
-         self.mock = libCTypeMock.StompMock( linkername, callbackForC, handle )
+         self.mock = _CMock.StompMock( linkername, callbackForC, handle )
       elif method == PRE:
-         self.mock = libCTypeMock.PreMock( linkername, callbackForC, handle )
+         self.mock = _CMock.PreMock( linkername, callbackForC, handle )
       else:
          assert False, "Unknown mock method %s" % method
 
@@ -126,7 +115,7 @@ class Mock:
       return mock
 
 def mangleFunc( lib, mangledname, restype=None, argtypes=None ):
-   mangled = libCTypeMock.mangle( lib._handle, mangledname )
+   mangled = _CMock.mangle( lib._handle, mangledname )
    assert len( mangled ) == 1, \
          "regex must match exactly one symbol in %s" % lib._name
    func = getattr( lib, mangled[ 0 ][ 1 ] )
@@ -137,7 +126,7 @@ def mangleFunc( lib, mangledname, restype=None, argtypes=None ):
    return func
 
 def mangleData( lib, ctype, mangledname ):
-   mangled = libCTypeMock.mangle( lib._handle, mangledname )
+   mangled = _CMock.mangle( lib._handle, mangledname )
    assert len( mangled ) == 1, \
          "regex must match exactly one symbol in %s" % lib._name
    return ctype.in_dll( lib, mangled[ 0 ][ 1 ] )

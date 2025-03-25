@@ -581,7 +581,7 @@ GOTMock::processLibrary( const MemoryProtection & addressSpace,
    // don't stub calls from libpython, libc, or ourselves.
    if ( strstr( libname, "libpython" ) )
       return;
-   if ( strstr( libname, "libCTypeMock" ) )
+   if ( strstr( libname, "_CMock" ) )
       return;
    if ( strstr( libname, "libc." ) )
       return;
@@ -1018,16 +1018,11 @@ static PyMethodDef mock_methods[] = {
  * Initialize python library
  */
 PyMODINIT_FUNC
-#if PY_MAJOR_VERSION >= 3
-PyInit_libCTypeMock( void )
-#else
-initlibCTypeMock( void )
-#endif
+PyInit__CMock( void )
 {
-#if PY_MAJOR_VERSION >= 3
    static struct PyModuleDef ctypeMockModule = {
       PyModuleDef_HEAD_INIT,
-      "libCTypeMock", /* m_name */
+      "_CMock", /* m_name */
       "CTypeMock C support", /* m_doc */
       -1, /* m_size */
       mock_methods, /* m_methods */
@@ -1036,21 +1031,12 @@ initlibCTypeMock( void )
       NULL, /* m_clear */
       NULL, /* m_free */
    };
-   PyObject * module = PyModule_Create( &ctypeMockModule );
-#else
-   PyObject * module =
-      Py_InitModule3( "libCTypeMock", mock_methods, "CTypeMock C support" );
-#endif
-   populateType< StompMock >(
-      module, stompObjectType, "StompMock", "A stomping mock" );
-   populateType< GOTMock >(
-      module, gotObjectType, "GOTMock", "A GOT hijacking mock" );
-   populateType< PreMock >(
-      module, preObjectType, "PreMock", "A pre-executing GOT hijacking mock" );
-
-#if PY_MAJOR_VERSION >= 3
-   return module;
-#endif
+   PyObject * mod = PyModule_Create( &ctypeMockModule );
+   populateType< StompMock >( mod, stompObjectType, "StompMock", "A stomping mock" );
+   populateType< GOTMock >( mod, gotObjectType, "GOTMock", "A GOT hijacking mock" );
+   populateType< PreMock >( mod, preObjectType,
+         "PreMock", "A pre-executing GOT hijacking mock" );
+   return mod;
 }
 
 /*

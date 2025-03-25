@@ -16,9 +16,9 @@
 import re
 import ctypes
 import CTypeGen
-import libCTypeGen
+import _CTypeGen
 import sys
-from libCTypeGen import tags
+from _CTypeGen import tags
 
 if len( sys.argv ) >= 2:
    mocklib = sys.argv[ 1 ]
@@ -37,7 +37,7 @@ module, resolver = CTypeGen.generate( "libEnumTest.so", "EnumGenerated.py",
         functions=lambda die: False,
         globalVars=lambda die: regex.match( die.name() ) )
 
-dwarf = libCTypeGen.open( "libEnumTest.so" )
+dwarf = _CTypeGen.open( "libEnumTest.so" )
 globvars = module.Globals( dll )
 
 def testFullRange( name, match ):

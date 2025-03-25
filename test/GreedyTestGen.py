@@ -16,7 +16,7 @@ from ctypes import CDLL, POINTER, byref
 import sys
 from CTypeGen import generateAll
 import CMock
-import libCTypeGen
+import _CTypeGen
 
 if len( sys.argv ) >= 2:
    sanitylib = sys.argv[ 1 ]
@@ -64,7 +64,7 @@ assert func.argtypes is not None
 res = func( byref( classWithMethods ), 100 )
 assert res == 100 + 24 + 42
 
-debug = libCTypeGen.open( sanitylib )
+debug = _CTypeGen.open( sanitylib )
 
 die = None
 
@@ -88,7 +88,7 @@ assert die.name() == "ClassWithMethods"
 die = die.parent()
 assert die.name() == "LookInside"
 die = die.parent()
-assert die.tag() == libCTypeGen.tags.DW_TAG_compile_unit
+assert die.tag() == _CTypeGen.tags.DW_TAG_compile_unit
 shouldBeNone = die.parent()
 assert shouldBeNone is None
 

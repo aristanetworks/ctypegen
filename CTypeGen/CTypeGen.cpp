@@ -30,6 +30,7 @@
 #include <set>
 #include <sstream>
 #include <vector>
+#include <elfutils/debuginfod.h>
 
 #include <libpstack/elf.h>
 #include <libpstack/dwarf.h>
@@ -134,7 +135,7 @@ typedef struct {
 
 /*
  * Tabulate objects, members, and init functions for "attrs" and "types" objects
- * inside the libCTypeGen namespace that can be used to access the DWARF attribute
+ * inside the _CTypeGen namespace that can be used to access the DWARF attribute
  * and tags values symbolically.
  */
 typedef struct {
@@ -850,15 +851,10 @@ entry_compare( PyObject * lhso, PyObject * rhso, int op ) {
    return richCompare( op, diff );
 }
 
-#if PY_MAJOR_VERSION >= 3
-typedef Py_hash_t hashfunc_result;
-#else
-typedef long hashfunc_result;
-#endif
-hashfunc_result
+Py_hash_t
 entry_hash( PyObject * self ) {
    PyDwarfEntry * ent = ( PyDwarfEntry * )self;
-   return hashfunc_result( ent->die.getOffset() ^ ent->die.getUnit()->offset );
+   return Py_hash_t( ent->die.getOffset() ^ ent->die.getUnit()->offset );
 }
 
 /*
@@ -1129,6 +1125,14 @@ unititer_next( PyObject * self ) {
    return rv;
 }
 
+// Iterators should return themselves when an iterator is requested.
+// Without this, `[ u for u in c ]` will fail if c is a UnitsCollection
+static PyObject *
+unititer_iter( PyObject * self ) {
+   Py_INCREF( self );
+   return self;
+}
+
 static void
 unititer_free( PyObject * o ) {
    PyDwarfUnitIterator * it = ( PyDwarfUnitIterator * )o;
@@ -1216,17 +1220,12 @@ static PySequenceMethods entry_sequence = {
 };
 
 PyMODINIT_FUNC
-#if PY_MAJOR_VERSION >= 3
-PyInit_libCTypeGen( void )
-#else
-initlibCTypeGen( void )
-#endif
+PyInit__CTypeGen( void )
 {
-#if PY_MAJOR_VERSION >= 3
 
    static struct PyModuleDef ctypeGenModule = {
       PyModuleDef_HEAD_INIT,
-      "libCTypeGen", /* m_name */
+      "_CTypeGen", /* m_name */
       "ELF/DWARF helper library", /* m_doc */
       -1, /* m_size */
       ctypegen_methods, /* m_methods */
@@ -1237,11 +1236,7 @@ initlibCTypeGen( void )
    };
 
    // Create our python module, and all our types.
-   PyObject * module = PyModule_Create( &ctypeGenModule );
-#else
-   PyObject * module =
-      Py_InitModule3( "libCTypeGen", ctypegen_methods, "ELF helpers" );
-#endif
+   PyObject * mod = PyModule_Create( &ctypeGenModule );
 
    dwarfAttrsType.tp_name = "DWARFAttrs";
    dwarfAttrsType.tp_flags = Py_TPFLAGS_DEFAULT;
@@ -1271,14 +1266,14 @@ initlibCTypeGen( void )
    dwarfBaseTypeEncodingsType.tp_dealloc = nullptr;
    dwarfBaseTypeEncodingsType.tp_init = ates_init;
 
-   elfObjectType.tp_name = "libCTypeGen.ElfObject";
+   elfObjectType.tp_name = "_CTypeGen.ElfObject";
    elfObjectType.tp_flags = Py_TPFLAGS_DEFAULT;
    elfObjectType.tp_basicsize = sizeof( PyElfObject );
    elfObjectType.tp_methods = elf_methods;
    elfObjectType.tp_doc = "ELF object";
    elfObjectType.tp_dealloc = elf_free;
 
-   unitsType.tp_name = "libCTypeGen.UnitsCollection";
+   unitsType.tp_name = "_CTypeGen.UnitsCollection";
    unitsType.tp_flags = Py_TPFLAGS_DEFAULT;
    unitsType.tp_basicsize = sizeof( PyUnits );
    unitsType.tp_methods = units_methods;
@@ -1287,15 +1282,16 @@ initlibCTypeGen( void )
    unitsType.tp_iter = units_iterator;
    unitsType.tp_as_number = &units_asnumber;
 
-   unitsIteratorType.tp_name = "libCTypeGen.UnitsIterator";
+   unitsIteratorType.tp_name = "_CTypeGen.UnitsIterator";
    unitsIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;
    unitsIteratorType.tp_basicsize = sizeof( PyDwarfUnitIterator );
    unitsIteratorType.tp_doc = "ELF object's DWARF units iterator";
    unitsIteratorType.tp_methods = unititer_methods;
    unitsIteratorType.tp_iternext = unititer_next;
+   unitsIteratorType.tp_iter = unititer_iter;
    unitsIteratorType.tp_dealloc = unititer_free;
 
-   dwarfEntryType.tp_name = "libCTypeGen.DwarfEntry";
+   dwarfEntryType.tp_name = "_CTypeGen.DwarfEntry";
    dwarfEntryType.tp_flags = Py_TPFLAGS_DEFAULT;
    dwarfEntryType.tp_basicsize = sizeof( PyDwarfEntry );
    dwarfEntryType.tp_doc = "DWARF DIE object";
@@ -1307,7 +1303,7 @@ initlibCTypeGen( void )
    dwarfEntryType.tp_richcompare = entry_compare;
    dwarfEntryType.tp_as_sequence = &entry_sequence;
 
-   unitType.tp_name = "libCTypeGen.DwarfUnit";
+   unitType.tp_name = "_CTypeGen.DwarfUnit";
    unitType.tp_flags = Py_TPFLAGS_DEFAULT;
    unitType.tp_basicsize = sizeof( PyDwarfUnit );
    unitType.tp_doc = "DWARF Unit object";
@@ -1315,7 +1311,7 @@ initlibCTypeGen( void )
    unitType.tp_methods = unit_methods;
    unitType.tp_richcompare = unit_compare;
 
-   dwarfEntryIteratorType.tp_name = "libCTypeGen.DwarfEntryIterator";
+   dwarfEntryIteratorType.tp_name = "_CTypeGen.DwarfEntryIterator";
    dwarfEntryIteratorType.tp_flags = Py_TPFLAGS_DEFAULT;
    dwarfEntryIteratorType.tp_basicsize = sizeof( PyDwarfEntryIterator );
    dwarfEntryIteratorType.tp_doc = "DWARF DIE object iterator";
@@ -1341,33 +1337,29 @@ initlibCTypeGen( void )
    for ( auto & descriptor : types ) {
       if ( PyType_Ready( descriptor.type ) == 0 ) {
          Py_INCREF( descriptor.type );
-         PyModule_AddObject(
-            module, descriptor.name, ( PyObject * )descriptor.type );
+         PyModule_AddObject( mod, descriptor.name, ( PyObject * )descriptor.type );
       }
    }
 
    // Add "tags" and "attrs" objects to name DWARF attribute and tag names
    auto tags = PyObject_New( PyObject, &dwarfTagsType );
    tags->ob_type->tp_init( tags, nullptr, nullptr );
-   PyModule_AddObject( module, "tags", ( PyObject * )tags );
+   PyModule_AddObject( mod, "tags", ( PyObject * )tags );
 
    auto attrs = PyObject_New( PyObject, &dwarfAttrsType );
    attrs->ob_type->tp_init( attrs, nullptr, nullptr );
-   PyModule_AddObject( module, "attrs", ( PyObject * )attrs );
+   PyModule_AddObject( mod, "attrs", ( PyObject * )attrs );
 
    auto encodings = PyObject_New( PyObject, &dwarfBaseTypeEncodingsType );
    encodings->ob_type->tp_init( encodings, nullptr, nullptr );
-   PyModule_AddObject( module, "encodings", ( PyObject * )encodings );
+   PyModule_AddObject( mod, "encodings", ( PyObject * )encodings );
 
    // add value->string mapping to name attributes and tags
    attrnames = make_attrnames();
    attrvalues = make_attrvalues();
    tagnames = make_tagnames();
-   PyModule_AddObject( module, "attrnames", attrnames );
-   PyModule_AddObject( module, "tagnames", tagnames );
-
-#if PY_MAJOR_VERSION >= 3
-   return module;
-#endif
+   PyModule_AddObject( mod, "attrnames", attrnames );
+   PyModule_AddObject( mod, "tagnames", tagnames );
+   return mod;
 }
 }
